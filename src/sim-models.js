@@ -1,0 +1,73 @@
+import { makeFleetCar } from './fleet.js'
+
+// Dimensions and dynamics shared by controls, collisions and the rendered fleet.
+export const vehicleSpecs = {
+  sedan: {
+    name: 'Meridian S4',
+    width: 1.84,
+    length: 4.55,
+    roof: 1.46,
+    axle: 2.68,
+    wheel: 0.325,
+    mass: 1500,
+    power: 7.2,
+    max: 50,
+    grip: 8.2,
+    brake: 12,
+  },
+  suv: {
+    name: 'Boreal Touring',
+    width: 1.99,
+    length: 4.76,
+    roof: 1.86,
+    axle: 2.83,
+    wheel: 0.375,
+    mass: 2100,
+    power: 6.2,
+    max: 43,
+    grip: 7.1,
+    brake: 10.5,
+  },
+  sports: {
+    name: 'Veloce GT',
+    width: 1.93,
+    length: 4.42,
+    roof: 1.24,
+    axle: 2.57,
+    wheel: 0.32,
+    mass: 1310,
+    power: 10.6,
+    max: 66,
+    grip: 10.3,
+    brake: 14,
+  },
+  pickup: {
+    name: 'Range C150',
+    width: 2.09,
+    length: 5.53,
+    roof: 1.84,
+    axle: 3.31,
+    wheel: 0.39,
+    mass: 2350,
+    power: 6.4,
+    max: 41,
+    grip: 6.3,
+    brake: 10.1,
+  },
+  offroad: {
+    name: 'Ridgeway 4×4',
+    width: 1.93,
+    length: 4.13,
+    roof: 1.94,
+    axle: 2.55,
+    wheel: 0.409,
+    mass: 1850,
+    power: 7.0,
+    max: 35,
+    grip: 7.7,
+    brake: 10.6,
+  },
+}
+export function makeCar(type, color) {
+  return makeFleetCar(type, vehicleSpecs[type], color)
+}

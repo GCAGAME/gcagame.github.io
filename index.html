@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#12191b">
+  <title>GCA: Grand City Adventures</title>
+  <link rel="icon" type="image/svg+xml" sizes="any" href="./assets/branding/gca.svg">
+  <link rel="stylesheet" href="./style.css">
+  <script type="importmap">{"imports":{"three":"./vendor/three.module.js"}}</script>
+</head>
+<body class="intro-playing">
+  <section id="studio-intro" aria-label="Studio introduction">
+    <div class="intro-frame intro-studio"><img src="./assets/branding/iliam.png" alt=""><span>iLiam Studios</span></div>
+    <div class="intro-frame intro-presents">presents</div>
+    <div class="intro-frame intro-original">An iLiam Games Original</div>
+    <div class="intro-frame intro-game"><img src="./assets/branding/gca.svg" alt="GCA"></div>
+    <button type="button" id="intro-skip">Skip</button>
+  </section>
+  <script>
+    window.studioIntroFinished = new Promise((resolve) => {
+      const intro = document.getElementById('studio-intro')
+      function finish() {
+        clearTimeout(timer)
+        window.removeEventListener('keydown', skipKey, true)
+        intro.remove()
+        document.body.classList.remove('intro-playing')
+        resolve()
+      }
+      function skipKey(event) {
+        if (event.key === 'Enter' || event.code === 'Space' || event.key === ' ') {
+          event.preventDefault()
+          event.stopImmediatePropagation()
+          finish()
+        }
+      }
+      const timer = setTimeout(finish, 8800)
+      window.addEventListener('keydown', skipKey, true)
+      document.getElementById('intro-skip').addEventListener('click', finish, { once: true })
+    })
+  </script>
+  <canvas id="game" tabindex="-1" aria-label="Briar County 3D game world"></canvas>
+  <main id="interface" data-view="loading">
+    <div id="menu-scene" aria-hidden="true"></div>
+    <section id="loading-screen" class="screen loading-screen" aria-label="Loading GCA: Grand City Adventures">
+      <div class="loading-block"><img class="load-logo" src="./assets/branding/gca.svg" alt="GCA"><h1>Grand City Adventures</h1><div class="load-track"><i id="load-bar"></i></div><div class="load-caption"><span id="load-label">Preparing Briar County</span><span id="load-percent">0%</span></div></div>
+    </section>
+    <section id="menu-screen" class="screen" aria-label="Main menu" hidden>
+      <header class="mast"><div class="identity"><img class="pr-symbol" src="./assets/branding/gca.svg" alt=""><span class="mast-divider"></span><span class="smallcap">Main menu</span></div><div class="tools"><button class="tool sound-tool" data-action="sound" title="Toggle audio"></button><button class="tool" data-action="fullscreen" aria-label="Toggle fullscreen" title="Toggle fullscreen"><span data-icon="fullscreen"></span></button></div></header>
+      <div class="hero"><div class="eyebrow"><i></i> Pacific Northwest</div><h1 class="wordmark"><img src="./assets/branding/gca.svg" alt="GCA"></h1><div class="game-subtitle">Grand City Adventures</div>
+        <nav class="menu-nav" aria-label="Game options">
+          <button class="menu-primary" data-action="newGame"><span class="btn-leading"><span data-icon="play"></span>New Game</span><span data-icon="arrowRight"></span></button>
+          <button class="continue-button" data-action="continue"><span class="btn-leading"><span data-icon="continue"></span>Continue</span><small id="save-status">No save</small></button>
+          <div class="secondary-nav"><button data-panel="settings"><span data-icon="settings"></span>Settings</button><button data-panel="controls"><span data-icon="controls"></span>Controls</button><button data-panel="credits"><span data-icon="credits"></span>Credits</button></div>
+        </nav>
+      </div>
+      <aside class="region-card" aria-label="Briar County regional overview"><div class="region-map"><canvas id="overview-map" aria-label="Regional road map"></canvas><span class="atlas-tag"><i></i> Region map</span><span class="atlas-north">N ↑</span></div><div class="region-caption"><span class="location-pin" data-icon="pin"></span><div><span class="region-name">Briar County</span><span class="region-sub">Pacific Northwest, USA</span></div></div></aside>
+      <footer class="menu-footer"><div class="footer-keys"><span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span><span><kbd>↵</kbd> Select</span></div><span class="local-mode"><i></i> Single player</span></footer>
+    </section>
+    <section id="hud" class="screen" aria-label="Player display" hidden>
+      <div id="world-edge" role="status" hidden>You've reached the edge of the explorable world.</div>
+      <div class="mission-widget"><div class="eyebrow"><i></i><span id="hud-mission-tag">Current mission</span></div><strong id="hud-mission"></strong><p id="hud-objective"></p><div class="mission-line"><i id="mission-progress"></i></div></div>
+      <div class="world-status"><span id="hud-weather"></span><span id="hud-time"></span><b id="hud-money"></b><small id="hud-fps"></small></div>
+      <div class="aim-dot"></div><div id="world-marker" hidden><span class="world-marker-icon"></span><b></b></div><button id="interaction" class="interaction-prompt" data-action="interact" hidden><kbd>E</kbd><span></span></button>
+      <div class="navigation"><div class="minimap-wrap"><canvas id="minimap"></canvas><div class="north">N ↑</div><button class="map-shortcut" data-panel="map" title="Open county map"><kbd>M</kbd></button></div><div class="navigation-bar"><span class="health-sign">+</span><span class="health-track"><i id="health-bar"></i></span><span id="hud-health">100</span></div><div id="hud-region" class="hud-region"></div></div>
+      <div id="driving" class="driving" hidden><span id="car-name" class="smallcap"></span><div class="speed-row"><small id="car-gear" title="Current gear"></small><b id="car-speed"></b><span>km/h</span></div><div class="car-stats"><span id="car-fuel"></span><span id="car-condition"></span></div></div>
+      <div class="hud-help" id="hud-help"></div>
+    </section>
+    <section id="panel-screen" class="screen sheet-backdrop" hidden><div id="sheet" class="sheet" role="dialog" aria-label="Game panel"><header class="sheet-head"><div><div class="eyebrow"><i></i><span id="sheet-kicker">Briar County</span></div><h2 id="sheet-title"></h2></div><button class="close-sheet" data-action="close" aria-label="Back" title="Back"><span data-icon="close"></span></button></header><div id="sheet-body"></div></div></section>
+    <div id="notification" role="status" aria-live="polite"><span data-icon="check"></span><span id="notification-text"></span></div>
+  </main>
+  <noscript>Enable JavaScript to play GCA: Grand City Adventures.</noscript>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>

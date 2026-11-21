@@ -1,0 +1,12 @@
+node_modules/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+.DS_Store
+Thumbs.db
+.env
+.env.*
+*.log
+Play GCA.html
+/drive-check.mjs
