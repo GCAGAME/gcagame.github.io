@@ -64,6 +64,8 @@ with game_url() as url, sync_playwright() as pw:
         b.sim.restore(save);b.refresh()
       };
       fixtureAt(-89,-72,true);
+    }""")
+    walking_controls = """()=>{const b=briar;
       window.tickActivity=(keys,look=0)=>{
         const x=b.sim.player.x,z=b.sim.player.z,dt=1/45;
         b.world.update(dt,{...b.sim.player,hour:11,quality:'Low',camera:b.camera});
@@ -77,6 +79,9 @@ with game_url() as url, sync_playwright() as pw:
           tickActivity(['KeyW'], -Math.atan2(Math.sin(angle),Math.cos(angle))/.0022)
         }throw Error('Walk blocked to '+[x,z]+' from '+[b.sim.player.x,b.sim.player.z])
       };
+    }"""
+    check(walking_controls)
+    check("""()=>{const b=briar;
       window.driveRoute=(points)=>{
         for(const [x,z,r=2.7] of points){
           let reached=false;
@@ -187,8 +192,13 @@ with game_url() as url, sync_playwright() as pw:
     def visit(x,z):
         check("""([x,z])=>{const b=briar,s=b.sim.serialize();s.current=null;
           Object.assign(s.player,{x,z,y:b.world.height(x,z)});b.sim.restore(s);b.refresh()}""", [x,z])
-    visit(-24,14.3)
-    interact('Cedar Grocer')
+    check(walking_controls)  # Continue ran in a freshly reloaded page.
+    visit(-20.9,20.85)
+    interact('market door')
+    check('for(let i=0;i<80;i++)tickActivity([]);walkTo(-20.9,17.35,.2);walkTo(-23.2,17.35);walkTo(-23.2,14.3)')
+    assert check("briar.world.indoors(briar.sim.player.x,briar.sim.player.z)")
+    assert check("briar.world.locations.grocer.name === 'Cedar Grocery'")
+    interact('Cedar Grocery')
     page.locator('[data-dialog="groceryWater"]').click()
     assert check('briar.story.state.bag.water===1 && briar.story.state.money===47')
     page.locator('[data-dialog="leave"]').click()

@@ -32,6 +32,13 @@ const world = createWorld(scene),
   sim = createSimulation(scene, camera, world)
 const completed = []
 const campaign = createCampaign(world, sim, {
+  dialog(kind) {
+    assert.equal(kind, 'dispatcher')
+    campaign.accept()
+  },
+  setHour(h) {
+    gameHour = h
+  },
   changed() {},
   chime() {},
   celebrate(c) {
@@ -102,7 +109,7 @@ function drive(points, speed = 7.8) {
     if (Math.hypot(car.x - ox, car.z - oz) < 0.006) {
       stuck++
     } else stuck = 0
-    if (stuck > 115) break
+    if (stuck > 800) break
   }
   const c = sim.vehicle
   if (i < points.length) {
@@ -134,6 +141,47 @@ assert(
 )
 assert(completed.includes('Welcome to the City'))
 assert(sim.enterExit().ok)
+// Follow streets with normal look and walking inputs. Each leg has a bounded timeout.
+function walk(points) {
+  for (const [x, z, r = 1.4] of points) {
+    let reached = false
+    for (let i = 0; i < 3000; i++) {
+      const p = sim.player,
+        dx = x - p.x,
+        dz = z - p.z
+      if (Math.hypot(dx, dz) < r) {
+        reached = true
+        break
+      }
+      const heading = Math.atan2(-dx, -dz)
+      step(set('KeyW'), angle(p.yaw - heading) / 0.0022)
+    }
+    assert(reached, 'Walking to ' + [x, z] + ' stopped at ' + [sim.player.x, sim.player.z])
+  }
+}
+const interact = () => {
+  const action = campaign.interaction()
+  assert(action, campaign.describe().objective)
+  action.run()
+  step()
+}
+walk([
+  [8, -77],
+  [8, -87.2],
+  [14, -87, 2],
+])
+interact()
+interact()
+walk([
+  [17, -87.2],
+  [56, -87.2],
+  [64, -96],
+  [64, -167],
+  [64, -172, 2],
+  [67, -172, 2],
+])
+interact()
+assert.equal(campaign.state.chapter, 2)
 const restored = sim.serialize()
 restored.player.x = 5.4
 restored.player.z = -239
@@ -159,6 +207,7 @@ assert(
   ),
 )
 assert(sim.player.y > 10)
+assert.equal(campaign.state.chapter, 3)
 console.log('PASS normal controlled driving on county roads and mountain switchbacks.', completed)
 const staff = sim.npcs.filter((n) => n.shift)
 for (let i = 0; i < 10000 && !staff.every((p) => p.z < -93 && p.to === p.from); i++) step()
@@ -177,3 +226,72 @@ console.log(
   staff.map(({ name, x, z, from, to }) => ({ name, x, z, from, to })),
 )
 assert(staff.every((p) => p.z > -88 && p.to === p.from))
+
+// Begin the landmark tour on foot near the archive; walk between all three interactions.
+const tour = sim.serialize()
+tour.current = null
+Object.assign(tour.player, { x: -49, z: -72, y: 0 })
+sim.restore(tour)
+interact()
+walk([
+  [-57, -72],
+  [-57, -87.2],
+  [64, -80],
+  [64, -129],
+  [64, -127],
+  [73, -126, 1],
+])
+interact()
+walk([
+  [64, -127],
+  [64, -129],
+  [64, -80],
+  [17, -87.2],
+])
+interact()
+assert.equal(campaign.state.chapter, 4)
+// Start the timed test in its marked bay. The loop drives through every checkpoint.
+const start = sim.serialize()
+Object.assign(
+  start.cars.find((c) => c.id === 'sedan'),
+  { x: 9, z: -72, yaw: Math.PI / 2 },
+)
+start.current = 'sedan'
+sim.restore(start)
+interact()
+assert(
+  drive(
+    [
+      [4, -73, 3],
+      [2.3, -81, 3.1],
+      [2.35, -119],
+      [2.35, -168],
+      [1, -176, 3],
+      [-5, -182, 3],
+      [-48, -182.2],
+      [-60, -181, 3],
+      [-65, -174, 3],
+      [-66.2, -153],
+      [-66.2, -94],
+      [-69.7, -20],
+      [-69.7, -6],
+      [-69.7, 18],
+      [-66.2, 44],
+      [-66, 55, 3],
+      [-61, 61, 3],
+      [-47, 62],
+      [-9, 62, 3],
+      [-1, 60, 3],
+      [2.35, 54],
+      [2.35, 31],
+      [2.35, 5],
+      [2.35, -40],
+      [2.35, -63],
+      [7.7, -71.5, 2.6],
+    ],
+    8.3,
+  ),
+)
+assert.deepEqual(campaign.state.completed, [0, 1, 2, 3, 4])
+assert.equal(campaign.state.money, 1330)
+console.log('All five campaigns paid out; end balance', campaign.state.money, completed)

@@ -1,5 +1,8 @@
+import { buildBarn } from './barn.js'
 import * as THREE from 'three'
+import { fitBuilding } from './cityAssets.js'
 import { foundryRow } from './foundryRow.js'
+import { movingDoor } from './movingDoor.js'
 import { hull } from './collision.js'
 import { addWildlife } from './worldWildlife.js'
 
@@ -52,12 +55,13 @@ export function populateTown(w) {
   function shade(x, z, wid, dep, y = 0.06) {
     plate(x, y, z, wid, dep, 'contact')
   }
-  function building(x, z, wid, d, h) {
+  function building(x, z, wid, d, h, base = height(x, z) - 0.1) {
     buildings.push({ x, z, w: wid, d })
-    rectangle(x, z, wid, d, height(x, z) - 0.1, height(x, z) + h)
+    rectangle(x, z, wid, d, base, height(x, z) + h)
   }
-  function sign(x, y, z, wid, h, text, subtitle = '', angle = 0, bg = '#31433d', fg = '#e9e4cd') {
-    const key = [text, subtitle, bg, fg].join('|')
+  const sign = paintSign.bind(null, false)
+  function paintSign(fitLetters, x, y, z, wid, h, text, subtitle = '', angle = 0, bg = '#31433d', fg = '#e9e4cd') {
+    const key = [text, subtitle, bg, fg, fitLetters ? wid / h : 0].join('|')
     if (!signCache.has(key)) {
       // Share the shopfront and wayfinding artwork across a neighborhood draw.
       // The half-texel inset keeps the adjacent cells out of the letter borders.
@@ -86,11 +90,25 @@ export function populateTown(w) {
       c.fillStyle = fg
       c.textAlign = 'center'
       c.textBaseline = 'middle'
-      c.font = 'bold ' + (subtitle ? 44 : 52) + 'px Arial, sans-serif'
-      c.fillText(text, W / 2, subtitle ? H * 0.4 : H * 0.52, W - 34)
-      if (subtitle) {
-        c.font = '500 19px Arial, sans-serif'
-        c.fillText(subtitle, W / 2, H * 0.76, W - 44)
+      if (fitLetters) {
+        // Lay out type in the physical plaque's proportions before packing its atlas cell.
+        const width = H * wid / h
+        c.scale(W / width, 1)
+        function line(value, weight, px, baseline) {
+          c.font = weight + ' ' + px + 'px Arial, sans-serif'
+          const fit = Math.min(1, (width - 32) / Math.max(1, c.measureText(value).width))
+          c.font = weight + ' ' + px * fit + 'px Arial, sans-serif'
+          c.fillText(value, width / 2, H * baseline)
+        }
+        line(text, 'bold', subtitle ? 55 : 71, subtitle ? .39 : .52)
+        if (subtitle) line(subtitle, '500', 24, .76)
+      } else {
+        c.font = 'bold ' + (subtitle ? 44 : 52) + 'px Arial, sans-serif'
+        c.fillText(text, W / 2, subtitle ? H * 0.4 : H * 0.52, W - 34)
+        if (subtitle) {
+          c.font = '500 19px Arial, sans-serif'
+          c.fillText(subtitle, W / 2, H * 0.76, W - 44)
+        }
       }
       c.restore()
       mat.map.needsUpdate = true
@@ -297,9 +315,8 @@ export function populateTown(w) {
         group.add(seam)
       }
     }
-    let open = false,
-      amount = 0
-    rectangle(x, z, wide, 0.14, base, base + tall, () => amount < 0.79)
+    let open = false
+    const motion = movingDoor(w, group, x, z, base, wide, tall, face, roll)
     const obj = {
       x,
       z: z + face * 0.6,
@@ -307,6 +324,15 @@ export function populateTown(w) {
       label: 'Open ' + label.toLowerCase(),
       get isOpen() {
         return open
+      },
+      get fraction() {
+        return motion.fraction
+      },
+      restoreDoor(value, fraction) {
+        this.setOpen(value)
+        motion.restore(
+          Number.isFinite(fraction) ? THREE.MathUtils.clamp(fraction, 0, 1) : Number(open),
+        )
       },
       setOpen(value) {
         open = Boolean(value)
@@ -323,11 +349,7 @@ export function populateTown(w) {
         const near = (x - w.observer.x) ** 2 + (z - w.observer.z) ** 2 < 39 ** 2
         for (let i = 1; i < group.children.length; i++) group.children[i].visible = near
       }
-      const target = open ? 1 : 0
-      if (Math.abs(amount - target) < 0.0005) return
-      amount = THREE.MathUtils.damp(amount, target, 7, dt)
-      if (roll) group.position.y = base + amount * (tall - 0.03)
-      else group.rotation.y = face * amount * 1.53
+      motion.advance(Number(open), dt)
     })
     return obj
   }
@@ -561,8 +583,8 @@ export function populateTown(w) {
     [-11.7, 49.2, 8.3, 'alder'],
     [-12.4, 36.6, 8.5, 'fir'],
     [-10.3, 25.7, 6.1, 'alder'],
-    [-30, 21, 9, 'fir'],
-    [-33, 14, 12, 'fir'],
+    [-31.8, 24, 9, 'fir'],
+    [-35.6, 11, 10, 'fir'],
     [-34.5, 30.4, 8, 'alder'],
     [11.8, 51.5, 7.2, 'alder'],
     [13.3, 70.3, 6.2, 'alder'],
@@ -768,6 +790,7 @@ export function populateTown(w) {
       continue
     }
     const tall = kind === 'parking-garage' ? Math.min(h, 7.5) : h
+    const fit = fitBuilding(kind, width, tall, depth)
     let deck = 0
     if (kind === 'parking-garage') {
       // The ground level is open to the street. Upper parking decks share one
@@ -775,7 +798,8 @@ export function populateTown(w) {
       deck = 3.25
       const face = z < -180 ? 1 : -1
       buildings.push({ x, z, w: width, d: depth })
-      rectangle(x, z, width, depth, deck, deck + tall)
+      rectangle(x, z, fit.w, fit.d, deck, deck + fit.h)
+      rectangle(x, z, width, depth, deck - 0.15, deck + 0.01)
       box(x, deck - 0.15, z, width, 0.16, depth, 'concrete', 0xb6b6a8)
       plate(x, 0.09, z, width, depth, 'asphalt', 0xa8aba4)
       for (const side of [-1, 1]) {
@@ -803,14 +827,14 @@ export function populateTown(w) {
         '#325553',
         '#f2ecd5',
       )
-    } else building(x, z, width, depth, tall)
+    } else building(x, z, fit.w, fit.d, fit.h)
     shade(x, z, width + 4, depth + 4, 0.066)
     w.city.place(kind, x, height(x, z) + deck + 0.02, z, {
       landmark: true,
-      size: [width, tall, depth],
+      scale: fit.scale,
     })
   }
-  foundryRow(w, { door, sign, shade })
+  foundryRow(w, { door, sign: paintSign.bind(null, true), shade })
   plate(-24, 0.072, 22.2, 16, 5.8, 'concrete', 0xd3cbbb)
   bench(-19, 22.2)
   garden(-31.3, 23.3, 2.9, 1.25)
@@ -1233,21 +1257,18 @@ export function populateTown(w) {
   const barnX = -168,
     barnZ = 10,
     barnY = height(barnX, barnZ)
-  box(barnX, barnY, barnZ, 15, 5.8, 10, 'siding', 0xb17660)
-  gable(barnX, barnY + 5.8, barnZ, 15.3, 10.2, 3.5, 0xa66f58)
-  building(barnX, barnZ, 15, 10, 9)
-  box(barnX, barnY + 0.06, barnZ + 5.1, 5.1, 3.9, 0.17, 'wood', 0x9d8e73)
-  rod([barnX + 12, barnY, barnZ], [barnX + 12, barnY + 9, barnZ], 2, 2, 'metal', 0xb6b7a9, 14)
-  rod(
-    [barnX + 12, barnY + 9, barnZ],
-    [barnX + 12, barnY + 10.3, barnZ],
-    2.1,
-    0.19,
-    'metal',
-    0x9faaa0,
-    14,
-  )
-  rectangle(barnX + 12, barnZ, 4, 4, barnY, barnY + 11)
+  const foundation = buildBarn(w, barnX, barnY, barnZ)
+  building(barnX, barnZ, 15, 10, 9.3, foundation)
+  const siloX = barnX + 12,
+    siloY = height(siloX, barnZ)
+  const rim = Array.from({ length: 14 }, (_, i) => {
+    const angle = (i * Math.PI) / 7
+    return [siloX - 2 * Math.sin(angle), barnZ - 2 * Math.cos(angle)]
+  })
+  const foot = Math.min(...rim.map(([x, z]) => height(x, z))) - 0.08
+  rod([siloX, foot, barnZ], [siloX, siloY + 9, barnZ], 2, 2, 'metal', 0xb6b7a9, 14)
+  rod([siloX, siloY + 9, barnZ], [siloX, siloY + 10.3, barnZ], 2.1, 0.19, 'metal', 0x9faaa0, 14)
+  rectangle(siloX, barnZ, 4, 4, foot, siloY + 10.3).poly = hull(rim)
   timberFence(-163, -3, -140, -3, 1.2)
   timberFence(-140, -3, -140, 22, 1.2)
   for (let i = 0; i < 10; i++) {

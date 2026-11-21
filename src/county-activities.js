@@ -177,7 +177,7 @@ export function createCountyActivities(scene, world, sim, story, hooks) {
     showroom: sites.showroom,
     dispatch: sites.dispatch,
     motorClub: sites.club,
-    grocer: point(-24, 14.3, 'Cedar Grocer'),
+    grocer: point(-24, 14.3, 'Cedar Grocery'),
     cafe: point(-79.3, -103.3, 'Juniper Kitchen'),
   })
   function target() {

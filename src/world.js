@@ -59,6 +59,7 @@ export function createWorld(scene) {
     cullTimer = 2,
     cullX = 9999,
     cullZ = 9999
+  let doorOccupancyTest = () => false
   const lights = []
   const info = (name) => locations[name]
   function rectangle(x, z, w, d, y = 0, top = 10000, condition = null) {
@@ -79,19 +80,27 @@ export function createWorld(scene) {
           if (!shape.condition || shape.condition()) found.add(shape)
     return found
   }
-  function blocked(x, z, r = 0.4, y = 0) {
+  function blocked(x, z, r = 0.4, y = 0, head = y + 0.85) {
     if (clearance(x, z) < r) return true
     for (let i = Math.floor((x - r) / 16); i <= Math.floor((x + r) / 16); i++)
       for (let j = Math.floor((z - r) / 16); j <= Math.floor((z + r) / 16); j++) {
         for (const o of obstacles.get(i + ',' + j) || []) {
           if (o.condition && !o.condition()) continue
-          if (y > o.top + 0.03 || y + 0.85 < o.y) continue
+          if (y > o.top + 0.03 || (o.kind === 'door' ? head : y + 0.85) < o.y) continue
           const dx = Math.max(0, Math.abs(x - o.x) - o.w / 2),
             dz = Math.max(0, Math.abs(z - o.z) - o.d / 2)
           if (dx * dx + dz * dz <= r * r && circleHits(x, z, r, o.poly)) return true
         }
       }
     return false
+  }
+  function doorCeiling(x, z, feet) {
+    let ceiling = Infinity
+    for (const door of candidates(x, z, 0.29)) {
+      if (door.kind === 'door' && door.y > feet && circleHits(x, z, 0.29, door.poly))
+        ceiling = Math.min(ceiling, door.y)
+    }
+    return ceiling
   }
   function ridge(x, z) {
     const n =
@@ -721,6 +730,7 @@ export function createWorld(scene) {
       rectangle(x + 2, z, 4, 0.2, -0.1, 1.3)
     }
   const context = {
+    doorOccupied: (...args) => doorOccupancyTest(...args),
     ...art,
     city,
     scene,
@@ -948,7 +958,7 @@ export function createWorld(scene) {
       stream(x, z)
     }
     const hour = state.hour ?? 14,
-      night = 1 - smooth(-.12, .13, Math.sin((hour - 6) * Math.PI / 12))
+      night = 1 - smooth(-0.12, 0.13, Math.sin(((hour - 6) * Math.PI) / 12))
     city.update(x, z, quality, drawDistance, night)
     if (Math.abs(night - wasNight) > 0.045) {
       for (let i = 0; i < 3; i++) m['facade' + i].emissiveIntensity = night * 0.88
@@ -964,8 +974,12 @@ export function createWorld(scene) {
   }
   setQuality('medium')
   return {
+    setDoorOccupancyTest(test) {
+      doorOccupancyTest = test
+    },
     height,
     blocked,
+    doorCeiling,
     candidates,
     update,
     locations,
