@@ -18,6 +18,24 @@ export function foundryRow(w, { door, sign, shade }) {
     side: THREE.DoubleSide,
   })
   standard('caseLight', { color: 0xffefcc, emissive: 0xffdb9e, emissiveIntensity: 1.75 })
+  // Repeating ceramic tile at physical scale, shared by all three shops.
+  const tile = w.canvasTexture(128, 128, (c) => {
+    c.fillStyle = '#a69e8f'
+    c.fillRect(0, 0, 128, 128)
+    for (let row = 0; row < 4; row++)
+      for (let col = 0; col < 4; col++) {
+        const light = 82 + ((row * 3 + col * 7) % 5)
+        c.fillStyle = 'hsl(39, 12%, ' + light + '%)'
+        c.fillRect(col * 32 + 1, row * 32 + 1, 31, 31)
+      }
+  })
+  standard('shopTile', { map: tile, roughness: 0.77 }, [2.4, 2.4])
+  function till(x, y, z) {
+    box(x, y, z, 0.32, 0.04, 0.23, 'metal', ink)
+    box(x, y + 0.04, z, 0.07, 0.17, 0.07, 'metal', ink)
+    box(x, y + 0.21, z, 0.36, 0.23, 0.055, 'solid', 0x37413e)
+    box(x, y + 0.23, z + 0.031, 0.315, 0.18, 0.012, 'solid', 0x88a9a1)
+  }
   const rooms = []
   // Paved lots meet the existing curbs. Control joints and planting strips follow
   // each parcel, leaving intersections, signal stop lines and entries clear.
@@ -103,7 +121,7 @@ export function foundryRow(w, { door, sign, shade }) {
     }
     wall(x, back, width, 0.27)
     for (const end of [left, right]) wall(end, z, 0.25, depth)
-    plate(x, 0.109, z, width, depth, 'concrete', 0xfff7e9)
+    plate(x, 0.109, z, width, depth, 'shopTile', label === 'showroom' ? 0xaab1b1 : 0xf0e1ca)
     w.floors.push({ x, z, w: width - 0.13, d: depth - 0.13, level: () => 0.109 })
     w.interiors.push({ x, z, w: width - 0.1, d: depth - 0.1 })
     for (const [a, b] of [
@@ -201,18 +219,6 @@ export function foundryRow(w, { door, sign, shade }) {
   box(-85, 1, -63.7, 4.15, 0.12, 0.84, 'metal', 0x5c615a)
   rectangle(-85, -63.7, 4, 0.84, 0, 1.16)
   sign(-85, 0.33, -64.09, 2.9, 0.46, 'COLLECTIONS', '', Math.PI, '#495654', '#eadfc8')
-  sign(
-    -89.4,
-    1.65,
-    -52.18,
-    8.3,
-    1.85,
-    'FOUNDRY MOTORS',
-    'BRIAR COUNTY   /   EST. 1968',
-    Math.PI,
-    '#294a4c',
-    '#f2dcb7',
-  )
   box(-77.7, 0.11, -52.64, 5.6, 0.95, 0.78, 'wood', 0xab8565)
   box(-77.7, 1.06, -52.64, 5.69, 0.09, 0.84, 'solid', ivory)
   rectangle(-77.7, -52.64, 5.7, 0.82, 0.1, 1.16)
@@ -238,6 +244,27 @@ export function foundryRow(w, { door, sign, shade }) {
   box(-94.05, 1.59, -70.4, 2.07, 0.12, 0.67, 'metal', ink)
   sign(-94.05, 0.88, -70.62, 1.68, 0.62, 'DISPATCH', 'COURIERS', Math.PI, '#773c29', '#fff4dc')
 
+  // A slatted display wall and spec lectern surround the existing show car.
+  for (let k = 0; k < 25; k++) box(-94.4 + k * 0.4, 0.13, -52.19, 0.29, 3.8, 0.08, 'wood', 0xb68765)
+  sign(
+    -89.4,
+    1.65,
+    -52.26,
+    6.3,
+    1.55,
+    'FOUNDRY MOTORS',
+    'BRIAR COUNTY   /   EST. 1968',
+    Math.PI,
+    '#294a4c',
+    '#f2dcb7',
+  )
+  box(-88.6, 0.115, -62.6, 0.46, 0.06, 0.37, 'metal', ink)
+  box(-88.6, 0.175, -62.6, 0.085, 0.86, 0.085, 'metal', ink)
+  box(-88.6, 1.03, -62.6, 0.74, 0.43, 0.07, 'metal', ink)
+  sign(-88.6, 1.06, -62.64, 0.68, 0.36, 'SPORT', 'COLLECTION', Math.PI, '#e7ddc8', '#303b39')
+  rectangle(-88.6, -62.6, 0.74, 0.37, 0.11, 1.46)
+  till(-83.8, 1.12, -63.7)
+
   const cafe = shop({
     x: -84,
     z: -102,
@@ -250,6 +277,18 @@ export function foundryRow(w, { door, sign, shade }) {
     wallTint: 0xc0a083,
     finish: 'brick',
   })
+  // Painted plaster above the timber dado and a matte ceiling soften the brick shell.
+  box(-84, 3.62, -102, 19.35, 0.1, 19.72, 'solid', 0xd7cbb6)
+  box(-84, 1.3, -111.83, 19.24, 2.31, 0.06, 'solid', 0x97a68e)
+  for (const end of [-93.64, -74.36]) {
+    box(end, 1.28, -102, 0.06, 2.34, 19.62, 'solid', 0xd4c8af)
+    box(end, 1.22, -102, 0.14, 0.08, 19.62, 'wood', 0xb48560)
+  }
+  for (const zz of [-97.6, -102.7, -107.8]) {
+    furniture('four-seat-restaurant-table', -84.9, zz, 0, { w: 1.2, d: 0.76 })
+    furniture('bentwood-cafe-chair', -84.9, zz + 0.83, Math.PI, { w: 0.48, d: 0.48 })
+    furniture('bentwood-cafe-chair', -84.9, zz - 0.83, 0, { w: 0.48, d: 0.48 })
+  }
   box(-84, 3.73, -102, 20.25, 0.35, 20.65, 'concrete', ivory)
   city.place('apartment-block', -84, 4.07, -103, {
     landmark: true,
@@ -282,6 +321,44 @@ export function foundryRow(w, { door, sign, shade }) {
   box(-77.4, 0.1, -103.9, 1.62, 1.1, 6.2, 'wood', 0xb7906c)
   rectangle(-77.4, -103.9, 1.62, 6.2, 0, 1.3)
 
+  // Lathe-turned shades, tableware and a working-height coffee bar.
+  for (const zz of [-97.3, -102, -106.8]) {
+    rod([-89.9, 2.71, zz], [-89.9, 3.72, zz], 0.018, 0.018, 'metal', ink)
+    rod([-89.9, 2.55, zz], [-89.9, 2.76, zz], 0.32, 0.1, 'metal', 0xa87747, 16)
+    rod([-89.9, 2.54, zz], [-89.9, 2.55, zz], 0.27, 0.27, 'caseLight', ivory, 16)
+    for (const offset of [-0.33, 0.33]) {
+      rod([-89.9, 0.878, zz + offset], [-89.9, 0.896, zz + offset], 0.13, 0.14, 'solid', ivory, 14)
+      rod(
+        [-89.9, 0.896, zz + offset],
+        [-89.9, 0.99, zz + offset],
+        0.042,
+        0.053,
+        'solid',
+        0xc7d3bc,
+        12,
+      )
+    }
+  }
+  box(-84, 0.12, -111.84, 19.2, 1.17, 0.11, 'wood', 0x967454)
+  box(-84, 1.29, -111.78, 19.2, 0.09, 0.2, 'wood', 0xd8b890)
+  sign(
+    -81.6,
+    1.54,
+    -111.79,
+    4.8,
+    1.57,
+    'JUNIPER KITCHEN',
+    'COFFEE   /   SOUP   /   DAILY LUNCH',
+    0,
+    '#334b43',
+    '#f7e8ca',
+  )
+  box(-77.4, 1.2, -103.9, 1.72, 0.09, 6.3, 'solid', ivory)
+  box(-77.4, 1.29, -105.6, 0.73, 0.43, 0.51, 'metal', 0x93a69d)
+  box(-77.4, 1.59, -105.34, 0.76, 0.11, 0.1, 'metal', ink)
+  till(-77.42, 1.29, -102.1)
+  furniture('potted-houseplant', -75.9, -110.1, 0, { lod: 2, w: 1.4, d: 1.3 })
+
   const market = shop({
     x: -24,
     z: 14.6,
@@ -310,11 +387,42 @@ export function foundryRow(w, { door, sign, shade }) {
     )
     box(x, 2.53, 20.87, 0.74, 0.24, 0.055, 'solid', i % 2 ? 0xe4d6b4 : 0x477263)
   }
-  sign(-24, 3.27, market.front + 0.18, 10.2, 0.67, 'CEDAR GROCER', '', 0, '#3b564d', '#f5edcf')
+  box(-24, 3.22, market.front + 0.35, 6.75, 1.08, 0.36, 'wood', 0xa17d58)
+  sign(-24, 3.28, market.front + 0.55, 6.54, 1.0, 'CEDAR GROCERY', '', 0, '#3b564d', '#f5edcf')
   for (const xx of [-28.6, -25.9])
     furniture('grocery-shelf-run', xx, 13.35, Math.PI / 2, { lod: 2, w: 1.05, d: 2.54 })
   furniture('grocery-shelf-run', -21.1, 10.6, 0, { lod: 2, w: 2.55, d: 1.05 })
   furniture('a-frame-chalkboard-sign', -27.4, 21, 0.12, { w: 0.6, d: 0.42 })
+  // Matte soffit and diffused strips above the aisles.
+  box(-24, 3.59, 14.6, 13.77, 0.11, 9.56, 'solid', 0xe2dacb)
+  for (const xx of [-28, -24, -20]) {
+    box(xx, 3.5, 14.6, 0.28, 0.09, 4.6, 'metal', ink)
+    box(xx, 3.48, 14.6, 0.19, 0.025, 4.45, 'caseLight', ivory)
+  }
+  box(-21.25, 0.11, 14, 1.03, 0.91, 2.65, 'wood', 0xab805e)
+  box(-21.25, 1.02, 14, 1.1, 0.1, 2.73, 'solid', 0xd8d6c4)
+  rectangle(-21.25, 14, 1.1, 2.73, 0.11, 1.12)
+  till(-21.27, 1.12, 14.83)
+  // Produce bins against the rear wall keep the purchase point and main aisle clear.
+  for (let k = 0; k < 4; k++) {
+    const xx = -29.45 + k * 1.65,
+      zz = 10.62
+    box(xx, 0.11, zz, 1.56, 0.76, 1.12, 'wood', 0xac825d)
+    for (const side of [-1, 1]) {
+      box(xx, 0.87, zz + side * 0.54, 1.55, 0.18, 0.055, 'wood', 0xc7a078)
+      box(xx + side * 0.75, 0.87, zz, 0.055, 0.18, 1.06, 'wood', 0xc7a078)
+    }
+    rectangle(xx, zz, 1.56, 1.12, 0.11, 1.05)
+    for (let row = 0; row < 3; row++)
+      for (let col = 0; col < 6; col++) {
+        const px = xx - 0.56 + col * 0.22 + (row % 2) * 0.055,
+          pz = zz - 0.3 + row * 0.27
+        const tint = [0xa34733, 0xcf8e37, 0x86a456, 0xb85943][k]
+        rod([px, 0.88, pz], [px, 1.0, pz], 0.07, 0.105, 'solid', tint, 8)
+        rod([px, 1.0, pz], [px, 1.07, pz], 0.105, 0.042, 'solid', tint, 8)
+      }
+  }
+  sign(-27, 1.55, 9.87, 4.4, 0.92, 'FARM PRODUCE', 'SEASONAL FRUIT', 0, '#3b564d', '#f5edcf')
   // One inverse-square fixture is reused as the player moves between rooms.
   const lamp = new THREE.PointLight(0xffdeb6, 0, 17, 2)
   w.scene.add(lamp)

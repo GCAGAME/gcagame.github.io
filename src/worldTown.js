@@ -59,8 +59,9 @@ export function populateTown(w) {
     buildings.push({ x, z, w: wid, d })
     rectangle(x, z, wid, d, base, height(x, z) + h)
   }
-  function sign(x, y, z, wid, h, text, subtitle = '', angle = 0, bg = '#31433d', fg = '#e9e4cd') {
-    const key = [text, subtitle, bg, fg].join('|')
+  const sign = paintSign.bind(null, false)
+  function paintSign(fitLetters, x, y, z, wid, h, text, subtitle = '', angle = 0, bg = '#31433d', fg = '#e9e4cd') {
+    const key = [text, subtitle, bg, fg, fitLetters ? wid / h : 0].join('|')
     if (!signCache.has(key)) {
       // Share the shopfront and wayfinding artwork across a neighborhood draw.
       // The half-texel inset keeps the adjacent cells out of the letter borders.
@@ -89,11 +90,25 @@ export function populateTown(w) {
       c.fillStyle = fg
       c.textAlign = 'center'
       c.textBaseline = 'middle'
-      c.font = 'bold ' + (subtitle ? 44 : 52) + 'px Arial, sans-serif'
-      c.fillText(text, W / 2, subtitle ? H * 0.4 : H * 0.52, W - 34)
-      if (subtitle) {
-        c.font = '500 19px Arial, sans-serif'
-        c.fillText(subtitle, W / 2, H * 0.76, W - 44)
+      if (fitLetters) {
+        // Lay out type in the physical plaque's proportions before packing its atlas cell.
+        const width = H * wid / h
+        c.scale(W / width, 1)
+        function line(value, weight, px, baseline) {
+          c.font = weight + ' ' + px + 'px Arial, sans-serif'
+          const fit = Math.min(1, (width - 32) / Math.max(1, c.measureText(value).width))
+          c.font = weight + ' ' + px * fit + 'px Arial, sans-serif'
+          c.fillText(value, width / 2, H * baseline)
+        }
+        line(text, 'bold', subtitle ? 55 : 71, subtitle ? .39 : .52)
+        if (subtitle) line(subtitle, '500', 24, .76)
+      } else {
+        c.font = 'bold ' + (subtitle ? 44 : 52) + 'px Arial, sans-serif'
+        c.fillText(text, W / 2, subtitle ? H * 0.4 : H * 0.52, W - 34)
+        if (subtitle) {
+          c.font = '500 19px Arial, sans-serif'
+          c.fillText(subtitle, W / 2, H * 0.76, W - 44)
+        }
       }
       c.restore()
       mat.map.needsUpdate = true
@@ -568,8 +583,8 @@ export function populateTown(w) {
     [-11.7, 49.2, 8.3, 'alder'],
     [-12.4, 36.6, 8.5, 'fir'],
     [-10.3, 25.7, 6.1, 'alder'],
-    [-30, 21, 9, 'fir'],
-    [-33, 14, 12, 'fir'],
+    [-31.8, 24, 9, 'fir'],
+    [-35.6, 11, 10, 'fir'],
     [-34.5, 30.4, 8, 'alder'],
     [11.8, 51.5, 7.2, 'alder'],
     [13.3, 70.3, 6.2, 'alder'],
@@ -819,7 +834,7 @@ export function populateTown(w) {
       scale: fit.scale,
     })
   }
-  foundryRow(w, { door, sign, shade })
+  foundryRow(w, { door, sign: paintSign.bind(null, true), shade })
   plate(-24, 0.072, 22.2, 16, 5.8, 'concrete', 0xd3cbbb)
   bench(-19, 22.2)
   garden(-31.3, 23.3, 2.9, 1.25)

@@ -8,6 +8,7 @@ The comparison release is `6299881b3bb3a5c6471757a2dc53b8cc1f808c7b`. Browser ru
 | GCA-001 | Medium | Streamed buildings stretched and gable siding sheared | Verified |
 | GCA-002 | Medium | Farm barn lacked convincing construction and ground contact | Verified |
 | GCA-004 | Medium | Farm silo floated above the hillside | Verified |
+| GCA-005 | Low | Cedar Grocery sign stretched and store name truncated | Verified |
 
 ## GCA-003 — Doorway obstruction
 
@@ -36,6 +37,14 @@ The comparison release is `6299881b3bb3a5c6471757a2dc53b8cc1f808c7b`. Browser ru
 - **Expected.** The shell should meet the terrain all the way around and its footprint should follow the metal wall.
 - **Repair.** Anchored the silo at its own site and extended the shell below the lowest point on its 14-sided rim. Its collision footprint uses the same ring.
 - **Verification.** Measured all 14 rim points, centre collision and clearance outside the curved wall. Reviewed ground contact in the matched farm views.
+
+## GCA-005 — Grocery storefront and shop interiors
+
+- **Reproduce.** Approach the grocery from the south sidewalk and look above the striped awning. On commit `93cb4eb` the sign read “CEDAR GROCER”. Its 4:1 artwork filled a 15.2:1 plaque, spreading the lettering horizontally. The map and purchase dialogue also used the shorter name.
+- **Expected.** The sign should read “CEDAR GROCERY” with naturally proportioned lettering, and the map and shopping prompt should use the same name.
+- **Repair.** Shop signs now lay out their lettering in the physical plaque's aspect ratio. The grocery has a shorter, taller sign mounted clear of the roof trim. Its internal location key is preserved for saved journeys. Moved two trees whose branches obscured the shop.
+- **Interior changes.** Added a checkout, produce bins, a tiled floor and strip fixtures in the grocery. The café has a furnished dining area, pendant shades, tableware and a coffee bar. The dealership has a sales terminal, timber display wall and vehicle information stand.
+- **Verification.** Compared the storefront and all three interiors at the same camera poses on High with clear afternoon light. The sign is fully visible and the sales floor is clear of branches. In the standalone build, walked in from the sidewalk, rounded the checkout, verified the map name and purchased water. Also tested café lunch and showroom sales services. [Matched in-game screenshots](tests/evidence/store-interiors.jpg)
 
 ## Exploration and gameplay
 

@@ -44,7 +44,7 @@ Follow the Civic Square road west to the sawtooth-roofed **Foundry Motors** show
 
 Speak to the motor club or the dispatch contact outside the showroom for two timed road races and two courier contracts. The objectives page tracks your current run. Survey rubbings can be found at the archive, waterfront lift and mountain lookout. A rubbing unlocks the trail 4×4 for purchase, and finishing a race unlocks the sports coupe. Vehicle registration, finishes, side work and rewards are included in saved journeys.
 
-Cedar Grocer sells provisions. A meal at Juniper Kitchen restores health. Both have walk-in interiors. The public garage has a drive-through ground level. Most apartment and office floors are scenery.
+Cedar Grocery sells provisions. A meal at Juniper Kitchen restores health. Both have walk-in interiors. The public garage has a drive-through ground level. Most apartment and office floors are scenery.
 
 Sprinting and swimming spend stamina. Walking, resting or drinking water restores it. A field jacket protects you in mountain snow. Cold water, long exposure and hard landings can cost health. Benches, water and first-aid kits help you recover. If health reaches zero, county rescue returns you home and charges up to $15.
 

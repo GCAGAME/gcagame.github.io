@@ -342,9 +342,9 @@ export function createInteractions(scene, world, sim, story, hooks) {
       () => activities.contact('delivery-coordinator'),
       0.55,
     )
-    add(world.locations.grocer, 2.2, 'Shop at Cedar Grocer', () =>
+    add(world.locations.grocer, 2.2, 'Shop at Cedar Grocery', () =>
       hooks.openDialog({
-        name: 'Cedar Grocer',
+        name: 'Cedar Grocery',
         text: 'Stock up before heading into the hills.',
         choices: [
           { id: 'groceryWater', label: 'Spring water · $8' },
