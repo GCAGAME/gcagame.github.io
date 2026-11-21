@@ -448,6 +448,9 @@ export function createInteractions(scene, world, sim, story, hooks) {
       benchIndex,
       places: {
         open: toggled.map(key),
+        doorFractions: Object.fromEntries(
+          world.interactables.flatMap((a, i) => (a.restoreDoor ? [[key(i), a.fraction]] : [])),
+        ),
         collected: [...used].map(key),
         seat: seated && benchIndex >= 0 ? key(benchIndex) : null,
       },
@@ -474,7 +477,8 @@ export function createInteractions(scene, world, sim, story, hooks) {
     const collected = new Set(indices(data.places?.collected, data.used))
     const seat = data.places ? byKey.get(data.places.seat) : legacyIndex(data.benchIndex)
     world.interactables.forEach((a, i) => {
-      if (a.setOpen) a.setOpen(toggled.has(i))
+      if (a.restoreDoor) a.restoreDoor(toggled.has(i), data.places?.doorFractions?.[placeKey(a)])
+      else if (a.setOpen) a.setOpen(toggled.has(i))
       else if (!!changes.get(i) !== toggled.has(i)) a.activate?.()
     })
     changes.clear()

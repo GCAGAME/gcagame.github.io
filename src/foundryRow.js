@@ -1,3 +1,4 @@
+import { fitBuilding } from './cityAssets.js'
 import * as THREE from 'three'
 import { makeCar } from './sim-models.js'
 
@@ -57,9 +58,10 @@ export function foundryRow(w, { door, sign, shade }) {
     [-43, 14, 9.5, 8.5, Math.PI],
     [-85, 15, 10, 9.5, 0],
   ]) {
-    city.place('red-cottage', xx, 0.02, zz, { landmark: true, size: [ww, 7.2, dd], yaw })
-    w.buildings.push({ x: xx, z: zz, w: ww, d: dd })
-    rectangle(xx, zz, ww, dd, 0, 7.2)
+    const fit = fitBuilding('red-cottage', ww, 7.2, dd)
+    city.place('red-cottage', xx, 0.02, zz, { landmark: true, scale: fit.scale, yaw })
+    w.buildings.push({ x: xx, z: zz, w: fit.w, d: fit.d })
+    rectangle(xx, zz, fit.w, fit.d, 0, fit.h)
     shade(xx, zz, ww + 2, dd + 2, 0.034)
   }
   // A pair of narrow brick-fronted workshops closes the west end of the motor row.
@@ -249,7 +251,10 @@ export function foundryRow(w, { door, sign, shade }) {
     finish: 'brick',
   })
   box(-84, 3.73, -102, 20.25, 0.35, 20.65, 'concrete', ivory)
-  city.place('apartment-block', -84, 4.07, -103, { landmark: true, size: [18.9, 12, 18.4] })
+  city.place('apartment-block', -84, 4.07, -103, {
+    landmark: true,
+    scale: fitBuilding('apartment-block', 18.9, 12, 18.4).scale,
+  })
   box(-84, 3.04, cafe.front + 0.56, 19.45, 0.16, 1.5, 'metal', 0x597365)
   sign(
     -87.5,

@@ -173,7 +173,7 @@ export function worldRenderer(scene) {
       const e0 = Math.hypot(...v1.map((v, i) => v - v0[i])),
         end = verts.at(-1)
       const e1 = Math.hypot(...end.map((v, i) => v - v0[i]))
-      if (verts.length <= 4)
+      if ((!su || !sv) && verts.length <= 4)
         uv = [
           [0, 0],
           [su ? e0 / su : 1, 0],

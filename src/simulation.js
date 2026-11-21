@@ -1,5 +1,5 @@
 import { clearance, limitX, limitZ, carMargins } from './boundary.js'
-import { boxHull, sweepHull } from './collision.js'
+import { boxHull, circleHits, sweepHull } from './collision.js'
 import * as THREE from 'three'
 import { makeCar, vehicleSpecs } from './sim-models.js'
 import { makePerson, posePerson, setPersonDetail, setPersonAppearance } from './people.js'
@@ -175,8 +175,45 @@ export function createSimulation(scene, camera, world) {
   const floor = (x, z) => world.height(x, z)
   const surfaceAt = (x, z) => world.surface?.(x, z) ?? world.surfaceAt?.(x, z) ?? 'road'
   const wetAt = (x, z) => world.waterAt?.(x, z) === true
-  const blocked = (x, z, r, y) =>
-    world.blocked(x, z, r, y) || Math.abs(x) > 900 || Math.abs(z) > 900
+  world.setDoorOccupancyTest?.((poly, bottom, top, pad, x, z, reach) => {
+    function personHits(p, radius, height) {
+      return (
+        Math.abs(x - p.x) <= reach + radius &&
+        Math.abs(z - p.z) <= reach + radius &&
+        p.y <= top &&
+        p.y + height >= bottom &&
+        circleHits(p.x, p.z, radius + pad, poly)
+      )
+    }
+    if (
+      (!current && personHits(player, 0.29, player.crouching ? 1.24 : 1.8)) ||
+      npcs.some((p) => personHits(p, 0.2, 1.8))
+    )
+      return true
+    for (const group of [cars, traffic])
+      for (const car of group) {
+        if (
+          !car.active ||
+          Math.hypot(x - car.x, z - car.z) > reach + car.hullRadius + pad ||
+          car.y > top ||
+          car.y + car.spec.roof < bottom
+        )
+          continue
+        if (
+          sweepHull(
+            boxHull(car.x, car.z, car.spec.width, car.spec.length, car.yaw),
+            poly,
+            0,
+            0,
+            pad,
+          ) < 1
+        )
+          return true
+      }
+    return false
+  })
+  const blocked = (x, z, r, y, head) =>
+    world.blocked(x, z, r, y, head) || Math.abs(x) > 900 || Math.abs(z) > 900
   function carEntity(type, x, z, yaw, id, color, ai = false) {
     const spec = vehicleSpecs[type],
       model = makeCar(type, color, ai)
@@ -415,7 +452,8 @@ export function createSimulation(scene, camera, world) {
     return npc
   }
   function obstacleForFeet(x, z) {
-    if (blocked(x, z, 0.29, player.y + 0.34)) return true
+    if (blocked(x, z, 0.29, player.y + 0.34, player.y + (player.crouching ? 1.24 : 1.8)))
+      return true
     for (const car of cars.concat(traffic)) {
       if (
         car.active &&
@@ -439,7 +477,11 @@ export function createSimulation(scene, camera, world) {
     const norm = Math.hypot(forward, strafe),
       sn = Math.sin(player.yaw),
       cs = Math.cos(player.yaw)
-    player.crouching = keys.has('ControlLeft') || keys.has('ControlRight')
+    const wantsCrouch = keys.has('ControlLeft') || keys.has('ControlRight')
+    player.crouching =
+      wantsCrouch ||
+      (player.crouching &&
+        (world.doorCeiling?.(player.x, player.z, player.y) ?? Infinity) < player.y + 1.8)
     const fast = keys.has('ShiftLeft') || keys.has('ShiftRight')
     const speed = seat
       ? 0
@@ -467,6 +509,14 @@ export function createSimulation(scene, camera, world) {
       player.grounded = false
     } else {
       vertical -= 19.6 * dt
+      if (vertical > 0) {
+        const ceiling = world.doorCeiling?.(player.x, player.z, player.y) ?? Infinity
+        const head = player.y + (player.crouching ? 1.24 : 1.8)
+        if (head + vertical * dt >= ceiling) {
+          player.y += Math.max(0, ceiling - head)
+          vertical = 0
+        }
+      }
       player.y += vertical * dt
       if (player.y <= ground) {
         player.y = ground
@@ -1045,10 +1095,15 @@ export function createSimulation(scene, camera, world) {
           p.crossing = cross
         }
         const atDoor =
-          p.shift && Math.abs(p.x - depot.x) < 1.0 && Math.abs(p.z - (depot.z - 2)) < 1.75
+          p.shift && Math.abs(p.x - depot.x) < 1.0 && Math.abs(p.z - (depot.z - 2)) < 3.65
         if (atDoor) {
           changeDoor(true)
           doorIdle = 3.2
+          // Approach from outside the sweep and wait for passage, including on the return shift.
+          if (publicDoor?.fraction < 0.98) {
+            posePerson(p.model, dt, 0, { look: true })
+            return
+          }
         }
         const occupied = (car) => {
           if (!car.active || Math.abs(car.x - p.x) > 8 || Math.abs(car.z - p.z) > 8) return false
@@ -1066,7 +1121,7 @@ export function createSimulation(scene, camera, world) {
             ),
             nx = p.x + (dx / remain) * stride,
             nz = p.z + (dz / remain) * stride
-          if (!blocked(nx, nz, 0.2, p.y + 0.55)) {
+          if (!blocked(nx, nz, 0.2, p.y + 0.55, p.y + 1.8)) {
             p.x = nx
             p.z = nz
             speed = stride / dt

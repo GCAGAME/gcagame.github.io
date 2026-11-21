@@ -1,13 +1,25 @@
 import * as THREE from 'three'
 
+// Reference extents from the detailed meshes, shared by both LODs and collision.
+const buildingSize = {
+  'apartment-block': [30.239999771118164, 22.32076889749638, 17.300303223040896],
+  'office-tower': [46.601108862213046, 70.9000015258789, 28.302006896270413],
+  'parking-garage': [40.63999938964844, 15.028378325887939, 31.213930620419394],
+  'red-cottage': [9.649999618530273, 7.41295023645819, 8.81478739531326],
+}
+export function fitBuilding(name, w, h, d) {
+  const [width, height, depth] = buildingSize[name]
+  const scale = Math.min(w / width, h / height, d / depth)
+  return { scale, w: width * scale, h: height * scale, d: depth * scale }
+}
+
 // Stream the local glTF derivatives by distance. Repeated props share instanced draws.
 export function cityAssets(scene) {
   const groups = new Map(),
     images = new Map(),
     loader = new THREE.FileLoader()
   const texLoader = new THREE.TextureLoader(),
-    pose = new THREE.Object3D(),
-    extent = new THREE.Vector3()
+    pose = new THREE.Object3D()
   const decode = (encoded, Type) =>
     new Type(Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0)).buffer)
   const glow = []
@@ -77,7 +89,7 @@ export function cityAssets(scene) {
           scene.add(mesh)
           return mesh
         })
-        group.batches.set(lod, { meshes, size })
+        group.batches.set(lod, { meshes })
         dirty = true
       },
       undefined,
@@ -122,8 +134,7 @@ export function cityAssets(scene) {
           if (!batch) continue
           pose.position.set(p.x, p.y, p.z)
           pose.rotation.set(0, p.yaw || 0, 0)
-          if (p.size) pose.scale.fromArray(p.size).divide(extent.fromArray(batch.size))
-          else pose.scale.setScalar(p.scale ?? 1)
+          pose.scale.setScalar(p.scale ?? 1)
           pose.updateMatrix()
           for (const mesh of batch.meshes) {
             mesh.setMatrixAt(mesh.count, pose.matrix)

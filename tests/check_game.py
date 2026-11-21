@@ -60,7 +60,14 @@ move('depot');briar.actions.act();let dialog=briar.screen()==='dialog';interacti
 move('delivery','sedan');sim.enterExit();briar.actions.act();let delivered=story.state.chapter===2&&!story.state.bag.parcel;
 move({x:8,z:-239},'offroad');move({x:20,z:-254},'offroad');move({x:92,z:-325},'offroad');move('summit','offroad');let mountain=story.state.chapter===3;
 move('landmark1');briar.actions.act();move('landmark2');briar.actions.act();move('depot');briar.actions.act();let discovery=story.state.chapter===4;
-move('downtown','sedan');briar.actions.act();const night=climate.state.hour>20&&story.state.remaining>0;story.update(181,0);const retry=story.state.step===0;briar.actions.act();move({x:2,z:-130},'sedan');move({x:-2,z:58},'sedan');move('downtown','sedan');tick(2);
+move('downtown','sedan');briar.actions.act();const night=climate.state.hour>20&&story.state.remaining>0;let retry=true;
+for(let i=0;i<12;i++){
+  story.update(181,0);
+  retry=retry && story.state.step===0;
+  briar.actions.act();
+  retry=retry && story.state.step===1;
+}
+move({x:2,z:-130},'sedan');move({x:-2,z:58},'sedan');move('downtown','sedan');tick(2);
 return {welcome,dialog,parcel,delivered,mountain,discovery,night,retry,finished:story.state.chapter===5,money:story.state.money,steps:story.state.completed};
 """)
     print('MISSIONS',result,flush=True)
