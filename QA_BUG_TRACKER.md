@@ -9,6 +9,8 @@ The comparison release is `6299881b3bb3a5c6471757a2dc53b8cc1f808c7b`. Browser ru
 | GCA-002 | Medium | Farm barn lacked convincing construction and ground contact | Verified |
 | GCA-004 | Medium | Farm silo floated above the hillside | Verified |
 | GCA-005 | Low | Cedar Grocery sign stretched and store name truncated | Verified |
+| GCA-006 | Medium | Harbor tower footings and quay deck did not meet the ground or seabed | Verified |
+| GCA-007 | High | Vehicles accepted input during entry and the driver clipped through the floor | Verified |
 
 ## GCA-003 — Doorway obstruction
 
@@ -45,6 +47,16 @@ The comparison release is `6299881b3bb3a5c6471757a2dc53b8cc1f808c7b`. Browser ru
 - **Repair.** Shop signs now lay out their lettering in the physical plaque's aspect ratio. The grocery has a shorter, taller sign mounted clear of the roof trim. Its internal location key is preserved for saved journeys. Moved two trees whose branches obscured the shop.
 - **Interior changes.** Added a checkout, produce bins, a tiled floor and strip fixtures in the grocery. The café has a furnished dining area, pendant shades, tableware and a coffee bar. The dealership has a sales terminal, timber display wall and vehicle information stand.
 - **Verification.** Compared the storefront and all three interiors at the same camera poses on High with clear afternoon light. The sign is fully visible and the sales floor is clear of branches. In the standalone build, walked in from the sidewalk, rounded the checkout, verified the map name and purchased water. Also tested café lunch and showroom sales services. [Matched in-game screenshots](tests/evidence/store-interiors.jpg)
+
+## GCA-006 — Harbor tower and quay
+
+At (83, −118), the four tower legs started at the same elevation over a sloping shore. The largest measured gap was 0.36 m. Each footing now extends below its lowest terrain corner, with a level cap supporting the steel leg. The original quay began offshore and had no walkable surface. A continuous timber deck now joins the bank to the original endpoint. Its piles reach the local bed and its rails have collision surfaces. The field test checks all four tower pads, walks the length of the quay under forward input, stops against the end rail, swims in the adjacent lake and rides the observation lift both ways.
+
+## GCA-007 — Vehicle entry and driver pose
+
+Holding throttle while entering the starter sedan previously moved the vehicle during the 1.25-second door animation. The controller assigned the vehicle immediately and consumed normal drive input on the next physics tick. Movement input now unlocks when the transfer finishes. The previous occupant pose used the bench animation and a fixed offset from the driver camera. The player now uses a seated driving pose fitted to each cabin, with the thighs forward, knees bent and feet in the footwell. The rig follows the vehicle's pitch and roll.
+
+The people test exercises all five models at 15, 30, 60 and 120 simulated FPS. It alternates forward, reverse and steering input, checks for premature displacement or re-entry, then accelerates after the handoff. It measures the rendered skin vertices in vehicle coordinates against the floor and roof and checks both legs' joint positions.
 
 ## Exploration and gameplay
 

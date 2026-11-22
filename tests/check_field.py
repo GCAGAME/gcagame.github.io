@@ -29,12 +29,28 @@ with sync_playwright() as pw:
       const snow=climate.state.snow>.8;
       const cold=climate.state;survival.reset();Object.assign(sim.player,{speed:6.4});for(let i=0;i<50;i++)survival.update(.5,cold,null);
       const fatigue=survival.state.stamina<25;const before=survival.state.stamina;story.state.bag.water=1;interactions.use('water');const better=survival.state.stamina>before;
+      // Cross the full quay under real walking input, then continue into its end rail.
+      go({x:86.8,z:-116});sim.player.yaw=-Math.PI/2;
+      let quayDry=true;
+      for(let i=0;i<900;i++){
+        sim.update(1/60,{keys:new Set(['KeyW']),settings});
+        if(sim.player.swimming || world.waterAt(sim.player.x,sim.player.z))quayDry=false
+      }
+      const quayWalk=quayDry && sim.player.x>126 && sim.player.x<126.85 && Math.abs(sim.player.y+.28)<.015;
+      // Each tower footing spans all four terrain corners under its actual footprint.
+      const towerFootings=[-1,1].every(dx=>[-1,1].every(dz=>{
+        const x=83+dx*2.6,z=-118+dz*2.6;
+        const pad=[...world.candidates(x,z,.05)].find(c=>Math.abs(c.x-x)<.001 && Math.abs(c.z-z)<.001 && c.w===1.12)
+        return pad && [-.56,.56].every(a=>[-.56,.56].every(b=>{
+          const ground=world.height(x+a,z+b);return pad.y <= ground-.19 && pad.top >= ground+.17
+        }))
+      }));
       const lake={x:139,z:-119};go(lake);sim.update(.05,{keys:new Set(),settings});const swim=sim.player.swimming&&sim.player.y>=world.height(lake.x,lake.z);
-      const car=sim.cars[0];go({x:car.x+1.8,z:car.z});const enter=sim.enterExit().entered;const f=sim.firstPerson;sim.toggleCamera();const cabin=sim.firstPerson!==f;sim.toggleLights();const lights=car.headlights;sim.enterExit();
+      const car=sim.cars[0];go({x:car.x+1.8,z:car.z});const enter=sim.enterExit().entered;const f=sim.firstPerson;sim.toggleCamera();const cabin=sim.firstPerson!==f;sim.toggleLights();const lights=car.headlights;for(let i=0;i<80;i++)sim.update(1/60,{settings});const exit=sim.enterExit().ok;
       climate.state.hour=0;climate.update(.03,sim.player,briar.camera,settings,world);const dark=climate.state.night;
       climate.state.hour=12;climate.update(.03,sim.player,briar.camera,settings,world);const bright=!climate.state.night;
       const graph=briar.navigation.route(world.locations.home,world.locations.summit);
-      return {seat,stand,pickup,once,open,savedDoor,floors,snow,fatigue,better,swim,enter,cabin,lights,dark,bright,gps:graph.length>=9,surfaceCompression:briar.scene.userData.surfaceTextures.size};
+      return {seat,stand,pickup,once,open,savedDoor,floors,snow,fatigue,better,swim,quayWalk,towerFootings,enter,exit,cabin,lights,dark,bright,gps:graph.length>=9,surfaceCompression:briar.scene.userData.surfaceTextures.size};
     }""")
     print('FIELD',d,flush=True)
     print('ERRORS',errs,flush=True)

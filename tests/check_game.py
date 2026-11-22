@@ -36,12 +36,13 @@ const {sim,story,world,scene,camera}=briar;
 let run=(n,keys=[],x=0,y=0)=>{for(let i=0;i<n;i++){sim.update(1/60,{keys:new Set(keys),lookX:i===0?x:0,lookY:i===0?y:0,settings:briar.settings(),night:false,wet:0});story.update(1/60,Math.abs(i===0?x:0))}};
 let start={...sim.player};run(1,[],20,-2);let yaw=sim.player.yaw;run(1,[], -20,2);run(36,['KeyW']);let walked=Math.hypot(sim.player.x-start.x,sim.player.z-start.z);
 sim.jump();run(12);let jump=sim.player.y-world.height(sim.player.x,sim.player.z);run(120);let landed=sim.player.grounded;
-let got=sim.enterExit();run(4);let initial=sim.cars[0].yaw;run(30,['KeyW','KeyA']);let delta=Math.abs(sim.cars[0].yaw-initial),speed=sim.cars[0].speed;run(65,['Space']);let parked=Math.abs(sim.cars[0].speed);
-return {yaw:yaw!==start.yaw,walked,jump,landed,entry:got.ok,speed,delta,parked,step:story.state.step};
+let got=sim.enterExit();run(65,['KeyW','KeyA']);let locked=sim.cars[0].speed===0 && sim.cars[0].steer===0;run(16);let initial=sim.cars[0].yaw;run(30,['KeyW','KeyA']);let delta=Math.abs(sim.cars[0].yaw-initial),speed=sim.cars[0].speed;run(65,['Space']);let parked=Math.abs(sim.cars[0].speed);
+return {yaw:yaw!==start.yaw,walked,jump,landed,entry:got.ok,locked,speed,delta,parked,step:story.state.step};
 """)
     print('CORE',result,flush=True)
     verify(result['yaw'] and result['walked']>.4,'Mouse delta look and grounded walking')
     verify(result['jump']>.3 and result['landed'],'Jump, gravity and landing')
+    verify(result['locked'],'Drive inputs wait for the entry animation')
     verify(result['entry'] and result['speed']>.5 and result['delta']>.003 and result['parked']<.8,'Vehicle entry, acceleration, steering, handbrake')
     verify(result['step']>=3,'First mission tracks walk and entry')
     if not result['entry']:

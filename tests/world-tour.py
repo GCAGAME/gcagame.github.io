@@ -82,6 +82,7 @@ with sync_playwright() as pw:
           const { sim, world, actions } = briar
           sim.reset()
           const car = sim.cars[0]
+          const finishTransfer = () => { for (let n = 0; n < 80; n++) sim.update(1/60) }
           for (let i = 0; i < 24; i++) {
             Object.assign(sim.player, {
               x: car.x - 1.6 * Math.cos(car.yaw),
@@ -89,9 +90,11 @@ with sync_playwright() as pw:
               y: car.y,
             })
             if (!sim.enterExit().entered) throw Error('Entry ' + i)
+            finishTransfer()
             sim.toggleCamera()
             sim.toggleCamera()
             if (sim.enterExit().entered !== false || sim.vehicle) throw Error('Exit ' + i)
+            finishTransfer()
           }
           for (let i = 0; i < 12; i++) {
             if (!briar.save(true)) throw Error('Save')

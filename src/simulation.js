@@ -466,6 +466,7 @@ export function createSimulation(scene, camera, world) {
     return false
   }
   function updateFeet(dt, keys, settings, lookX, lookY) {
+    if (!transfer) avatar.group.scale.setScalar(1)
     if (!seat) {
       player.yaw = angle(player.yaw - lookX)
       player.pitch = clamp(player.pitch - lookY, -1.25, 1.22)
@@ -825,7 +826,7 @@ export function createSimulation(scene, camera, world) {
       camPitch = damp(camPitch, 0.2, 2.1, dt)
     }
     cruiseYaw = angle(cruiseYaw + angle(c.yaw - cruiseYaw) * (1 - Math.exp(-8.2 * dt)))
-    if (driverView) {
+    if (driverView && !transfer) {
       const p = c.model.cabin
       camera.position
         .set(p.x, p.y, p.z)
@@ -1155,34 +1156,66 @@ export function createSimulation(scene, camera, world) {
     transfer = { car, mode, elapsed: 0, x: standing.x, y: floor(standing.x, standing.z), z: standing.z }
   }
 
+  const seatAnchor = new THREE.Vector3()
+  const transferKeys = new Set()
   function presentDriver(dt) {
     const car = current || transfer?.car
     if (!car) return
     const cabin = car.model.cabin
-    const cos = Math.cos(car.yaw), sin = Math.sin(car.yaw)
-    const x = car.x + cabin.x * cos + cabin.z * sin
-    const z = car.z - cabin.x * sin + cabin.z * cos
-    const y = car.y + cabin.y - 1.36
-    avatar.group.visible = current ? !driverView : !first
-    avatar.group.rotation.y = car.yaw
+    const body = car.model.group
+    const footwell = car.spec.wheel * 0.65
+    const pose = avatar.driverPose
+    const scale = pose
+      ? Math.min(1, (car.spec.roof - 0.07 - footwell) / (pose.top - pose.bottom))
+      : 1
+    const base = pose
+      ? Math.min(
+          car.spec.roof - 0.07 - pose.top * scale,
+          Math.max(footwell - pose.bottom * scale, cabin.y - 0.98 * pose.top * scale),
+        )
+      : footwell
+    seatAnchor
+      .set(cabin.x, base, cabin.z + 0.05)
+      .applyQuaternion(body.quaternion)
+      .add(body.position)
+    avatar.group.visible = transfer ? true : !driverView
     if (!transfer) {
-      avatar.group.position.set(x, y, z)
-      posePerson(avatar, dt, 0, { seat: true })
+      avatar.group.quaternion.copy(body.quaternion)
+      avatar.group.scale.setScalar(scale)
+      avatar.group.position.copy(seatAnchor)
+      posePerson(avatar, dt, 0, { driver: true })
       return
     }
     transfer.elapsed += dt
     const progress = Math.min(1, transfer.elapsed / 1.25)
-    const throughDoor = THREE.MathUtils.smoothstep(progress, .20, .84)
+    const throughDoor = THREE.MathUtils.smoothstep(progress, 0.2, 0.84)
     const sitting = transfer.mode === 'enter' ? throughDoor : 1 - throughDoor
-    const exterior = current ? transfer : player
-    avatar.group.position.set(lerp(exterior.x, x, sitting), lerp(exterior.y, y, sitting), lerp(exterior.z, z, sitting))
-    const openness = THREE.MathUtils.smoothstep(progress, 0, .24) * (1 - THREE.MathUtils.smoothstep(progress, .76, 1))
+    const exterior = transfer
+    const { x, y, z } = seatAnchor
+    avatar.group.rotation.set(0, car.yaw, 0)
+    avatar.group.quaternion.slerp(body.quaternion, sitting)
+    avatar.group.scale.setScalar(lerp(1, scale, sitting))
+    avatar.group.position.set(
+      lerp(exterior.x, x, sitting),
+      lerp(exterior.y, y, sitting),
+      lerp(exterior.z, z, sitting),
+    )
+    const openness =
+      THREE.MathUtils.smoothstep(progress, 0, 0.24) *
+      (1 - THREE.MathUtils.smoothstep(progress, 0.76, 1))
     car.model.setDoorOpen?.(openness)
-    posePerson(avatar, dt, 0, { transfer: transfer.mode, progress })
+    posePerson(
+      avatar,
+      dt,
+      0,
+      sitting >= 0.98 ? { driver: true } : { transfer: transfer.mode, progress },
+    )
     if (progress === 1) transfer = null
   }
 
   function enterExit() {
+    if (transfer)
+      return { ok: false, entered: !!current, car: transfer.car, message: 'Wait for the door.' }
     if (current) {
       const car = current
       if (Math.abs(car.speed) > 2.5)
@@ -1240,6 +1273,7 @@ export function createSimulation(scene, camera, world) {
       return { ok: false, entered: false, car: null, message: 'Walk closer to a parked vehicle.' }
     startTransfer(car, 'enter', player)
     current = car
+    car.speed = car.steer = 0
     seat = false
     player.seated = false
     player.flashlight = false
@@ -1260,7 +1294,7 @@ export function createSimulation(scene, camera, world) {
     return current ? driverView : first
   }
   function jump() {
-    if (!current && !seat && player.grounded) {
+    if (!current && !transfer && !seat && player.grounded) {
       vertical = 6.25
       player.grounded = false
       return true
@@ -1293,6 +1327,8 @@ export function createSimulation(scene, camera, world) {
   function reset() {
     transfer?.car.model.setDoorOpen?.(0)
     transfer = null
+    avatar.group.scale.setScalar(1)
+    avatar.group.rotation.set(0, 0, 0)
     remainder = pendingX = pendingY = 0
     cars.forEach((c) => (c.clearPose = null))
     Object.assign(player, {
@@ -1405,8 +1441,8 @@ export function createSimulation(scene, camera, world) {
     const lookY =
       (input.lookY || 0) * sense +
       (Number(keys.has('ArrowDown')) - Number(keys.has('ArrowUp'))) * 1.15 * dt
-    if (current) updateDrive(dt, keys, settings, lookX, lookY, wet)
-    else updateFeet(dt, keys, settings, lookX, lookY)
+    if (current) updateDrive(dt, transfer ? transferKeys : keys, settings, lookX, lookY, wet)
+    else updateFeet(dt, transfer ? transferKeys : keys, settings, lookX, lookY)
     if (current || transfer) presentDriver(dt)
     const cropped = keys.has('MouseRight'),
       fov = clamp(Number(settings.fov) || 68, 40, 110) * (cropped ? 0.7 : 1)
@@ -1535,7 +1571,7 @@ export function createSimulation(scene, camera, world) {
     serialize,
     restore,
     enterExit,
-    unstuck: () => current && recoverCar(current, true),
+    unstuck: () => !transfer && current && recoverCar(current, true),
     nearestCar,
     parkCar,
     nearestNpc,

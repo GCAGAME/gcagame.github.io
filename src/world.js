@@ -191,7 +191,8 @@ export function createWorld(scene) {
       x < 209 &&
       z > -278 &&
       z < 44 &&
-      terrainHeight(x, z) < waterLevel - 0.06
+      terrainHeight(x, z) < waterLevel - 0.06 &&
+      !floors.some((f) => f.aboveWater && inRect(x, z, f))
     )
   }
   function road(points, width = 10, kind = 'road') {

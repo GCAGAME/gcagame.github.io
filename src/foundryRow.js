@@ -264,6 +264,13 @@ export function foundryRow(w, { door, sign, shade }) {
   sign(-88.6, 1.06, -62.64, 0.68, 0.36, 'SPORT', 'COLLECTION', Math.PI, '#e7ddc8', '#303b39')
   rectangle(-88.6, -62.6, 0.74, 0.37, 0.11, 1.46)
   till(-83.8, 1.12, -63.7)
+  // Folded brochures in a divided rack at the collection desk.
+  box(-86.2, 1.12, -63.7, 0.68, 0.06, 0.34, 'wood', 0xa37c57)
+  for (const [i, tint] of [0xa15a3b, 0x516f78, 0x757c56].entries()) {
+    const px = -86.41 + i * 0.21
+    box(px, 1.18, -63.7, 0.18, 0.24, 0.045, 'solid', tint)
+    box(px, 1.33, -63.73, 0.13, 0.022, 0.015, 'solid', ivory)
+  }
 
   const cafe = shop({
     x: -84,
@@ -357,6 +364,23 @@ export function foundryRow(w, { door, sign, shade }) {
   box(-77.4, 1.29, -105.6, 0.73, 0.43, 0.51, 'metal', 0x93a69d)
   box(-77.4, 1.59, -105.34, 0.76, 0.11, 0.1, 'metal', ink)
   till(-77.42, 1.29, -102.1)
+  // Cups and coffee tins on the wall shelves behind the espresso station.
+  for (const y of [1.55, 2.12]) {
+    box(-74.67, y, -104.5, 0.45, 0.07, 3.1, 'wood', 0xb58e65)
+    for (let i = 0; i < 7; i++) {
+      const z = -105.7 + i * 0.37,
+        cup = y < 2
+      rod(
+        [-74.72, y + 0.07, z],
+        [-74.72, y + (cup ? 0.23 : 0.37), z],
+        cup ? 0.075 : 0.115,
+        cup ? 0.097 : 0.115,
+        cup ? 'solid' : 'metal',
+        cup ? ivory : 0x896b4c,
+        12,
+      )
+    }
+  }
   furniture('potted-houseplant', -75.9, -110.1, 0, { lod: 2, w: 1.4, d: 1.3 })
 
   const market = shop({
@@ -423,6 +447,28 @@ export function foundryRow(w, { door, sign, shade }) {
       }
   }
   sign(-27, 1.55, 9.87, 4.4, 0.92, 'FARM PRODUCE', 'SEASONAL FRUIT', 0, '#3b564d', '#f5edcf')
+  // A chilled dairy case sits along the east wall, beyond the checkout aisle.
+  const caseX = -17.68,
+    caseZ = 14.3
+  box(caseX, 0.11, caseZ, 0.88, 0.25, 3.8, 'metal', ink)
+  box(caseX + 0.38, 0.36, caseZ, 0.09, 1.65, 3.8, 'solid', ivory)
+  for (const dz of [-1.85, 1.85]) box(caseX, 0.36, caseZ + dz, 0.88, 1.65, 0.095, 'metal', ink)
+  for (const y of [0.4, 0.94, 1.48]) {
+    box(caseX, y, caseZ, 0.83, 0.045, 3.66, 'metal', 0xb5b8ac)
+    for (let i = 0; i < 10; i++) {
+      const z = caseZ - 1.53 + i * 0.34
+      box(caseX - 0.12, y + 0.045, z, 0.2, 0.27, 0.19, 'solid', ivory)
+      box(caseX - 0.12, y + 0.315, z, 0.17, 0.05, 0.16, 'solid', i % 2 ? 0x617d88 : 0x789379)
+      box(caseX - 0.224, y + 0.12, z, 0.012, 0.1, 0.175, 'solid', i % 3 ? 0x73959b : 0xaf806a)
+    }
+  }
+  box(caseX, 1.98, caseZ, 0.89, 0.15, 3.8, 'metal', ink)
+  box(caseX - 0.36, 1.96, caseZ, 0.1, 0.025, 3.58, 'caseLight', ivory)
+  for (const dz of [-0.92, 0.92]) {
+    box(caseX - 0.42, 0.36, caseZ + dz, 0.018, 1.62, 1.78, 'storeGlass', 0xffffff)
+    box(caseX - 0.46, 1.03, caseZ + dz - 0.75, 0.055, 0.38, 0.042, 'metal', ink)
+  }
+  rectangle(caseX, caseZ, 0.91, 3.8, 0.11, 2.13)
   // One inverse-square fixture is reused as the player moves between rooms.
   const lamp = new THREE.PointLight(0xffdeb6, 0, 17, 2)
   w.scene.add(lamp)
