@@ -1275,7 +1275,8 @@ export function populateTown(w) {
   }
   shelter(28, -72)
   bench(-35, -72)
-  bench(92, -120, Math.PI / 2)
+  box(78, 0, -115, 2.5, 0.07, 1.35, 'concrete', 0xc4beb0)
+  bench(78, -115)
   function playground() {
     plate(42, 0.045, 21, 15, 11, 'dirt', 0xcdb68b)
     for (const xx of [38, 44])
