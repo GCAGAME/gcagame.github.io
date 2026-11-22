@@ -1369,11 +1369,14 @@ export function populateTown(w) {
   changeSignals(0, true)
   dynamic.push(changeSignals)
   function streetlight(x, z, face = 1) {
-    rod([x, 0.08, z], [x, 6.1, z], 0.092, 0.058, 'metal', 0x83908b)
-    rod([x, 5.82, z], [x + face * 0.42, 6.37, z], 0.062, 0.052, 'metal', 0x83908b)
-    rod([x + face * 0.42, 6.37, z], [x + face * 1.6, 6.46, z], 0.052, 0.042, 'metal', 0x83908b)
-    box(x + face * 1.58, 6.34, z, 0.63, 0.16, 0.36, 'metal', 0x6c7771)
-    box(x + face * 1.58, 6.315, z, 0.52, 0.046, 0.29, 'lamp', 0xf0dfb8)
+    const base = height(x, z)
+    // The street grid extends past the level bank on the harbor side.
+    if (w.waterAt(x, z) || (x > 78 && base < -0.2)) return
+    rod([x, base - 0.1, z], [x, base + 6.1, z], 0.092, 0.058, 'metal', 0x83908b)
+    rod([x, base + 5.82, z], [x + face * 0.42, base + 6.37, z], 0.062, 0.052, 'metal', 0x83908b)
+    rod([x + face * 0.42, base + 6.37, z], [x + face * 1.6, base + 6.46, z], 0.052, 0.042, 'metal', 0x83908b)
+    box(x + face * 1.58, base + 6.34, z, 0.63, 0.16, 0.36, 'metal', 0x6c7771)
+    box(x + face * 1.58, base + 6.315, z, 0.52, 0.046, 0.29, 'lamp', 0xf0dfb8)
   }
   for (const x of [-64, 0, 64])
     for (let z = -200; z <= 50; z += 26) {
