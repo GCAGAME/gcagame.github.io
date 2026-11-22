@@ -90,6 +90,7 @@ with sync_playwright() as pw:
               y: car.y,
             })
             if (!sim.enterExit().entered) throw Error('Entry ' + i)
+            for (let n = 0; n < 480 && !sim.vehicle; n++) sim.update(1/60)
             finishTransfer()
             sim.toggleCamera()
             sim.toggleCamera()

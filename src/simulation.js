@@ -160,6 +160,7 @@ export function createSimulation(scene, camera, world) {
     camPitch = 0.19,
     orbitWait = 0,
     seat = false,
+    approachDoor = null,
     transfer = null,
     collisionCooldown = 0,
     violation = 0,
@@ -492,9 +493,11 @@ export function createSimulation(scene, camera, world) {
           ? 1.55
           : fast && forward >= 0
             ? 6.4
-            : 3.05
-    const dx = norm ? ((strafe * cs - forward * sn) * speed) / norm : 0
-    const dz = norm ? ((-forward * cs - strafe * sn) * speed) / norm : 0
+            : approachDoor ? 1.8 : 3.05
+    const moveSin = approachDoor ? Math.sin(approachDoor.heading) : sn
+    const moveCos = approachDoor ? Math.cos(approachDoor.heading) : cs
+    const dx = norm ? ((strafe * moveCos - forward * moveSin) * speed) / norm : 0
+    const dz = norm ? ((-forward * moveCos - strafe * moveSin) * speed) / norm : 0
     vx = approach(vx, dx, dt * (norm ? 17 : 22))
     vz = approach(vz, dz, dt * (norm ? 17 : 22))
     const nx = player.x + vx * dt,
@@ -533,7 +536,7 @@ export function createSimulation(scene, camera, world) {
       player.health = Math.min(player.health + 0.55, 100)
       foodClock = 0
     }
-    avatar.group.visible = !first
+    avatar.group.visible = !!approachDoor || !first
     avatar.group.position.set(player.x, player.y, player.z)
     if (!transfer) {
       const facing = player.speed > .35 ? Math.atan2(-vx, -vz) : player.yaw
@@ -543,7 +546,7 @@ export function createSimulation(scene, camera, world) {
     }
     headHeight = damp(headHeight, seat ? 1.19 : player.crouching ? 1.13 : 1.65, 12, dt)
     targetCam.set(player.x, player.y + headHeight, player.z)
-    if (first) {
+    if (first && !approachDoor) {
       const bob =
         settings.headBob !== false && player.grounded
           ? Math.sin(phase * 2) * 0.024 * Math.min(1, player.speed / 3)
@@ -1213,7 +1216,66 @@ export function createSimulation(scene, camera, world) {
     if (progress === 1) transfer = null
   }
 
-  function enterExit() {
+  // Test short footpaths on both sides of the bumpers before committing to a walk.
+  function driverPath(car) {
+    const c = Math.cos(car.yaw), s = Math.sin(car.yaw)
+    const side = car.spec.width / 2 + 0.57, end = car.spec.length / 2 + 0.58
+    const point = (x, z) => ({ x: car.x + c*x + s*z, z: car.z - s*x + c*z })
+    const door = point(-side, car.model.cabin.z)
+    const routes = [[door]]
+    for (const z of [-end, end]) {
+      const left = point(-side, z), right = point(side, z)
+      routes.push([left, door], [right, left, door])
+    }
+    let best = null, shortest = Infinity
+    for (const route of routes) {
+      let from = player, length = 0
+      for (const to of route) {
+        const span = distance(from, to), samples = Math.max(1, Math.ceil(span / 0.12))
+        let ground = floor(from.x, from.z)
+        for (let i = 1; i <= samples; i++) {
+          const x = lerp(from.x, to.x, i / samples), z = lerp(from.z, to.z, i / samples)
+          const y = floor(x, z)
+          if (obstacleForFeet(x,z) || wetAt(x,z) || Math.abs(y-ground) >= 0.59) {
+            length = Infinity
+            break
+          }
+          ground = y
+        }
+        if (!Number.isFinite(length)) break
+        length += span
+        from = to
+      }
+      if (length < shortest) { best = route; shortest = length }
+    }
+    return best
+  }
+
+  const walkForward = new Set(['KeyW'])
+  function walkToDoor(dt, settings) {
+    const walk = approachDoor, target = walk.route[0], remaining = distance(player, target)
+    if (remaining < 0.09) {
+      walk.route.shift()
+      vx = vz = 0
+      if (!walk.route.length) {
+        approachDoor = null
+        beginEntry(walk.car)
+        walk.onDoor?.()
+      }
+      return
+    }
+    walk.heading = Math.atan2(player.x-target.x, player.z-target.z)
+    player.yaw += angle(walk.heading - player.yaw) * (1 - Math.exp(-8 * dt))
+    updateFeet(dt, walkForward, settings, 0, 0)
+    walk.stalled = distance(player,target) < remaining - 0.0001 ? 0 : walk.stalled + dt
+    if (walk.stalled > 0.4) {
+      approachDoor = null
+      vx = vz = 0
+    }
+  }
+
+  function enterExit(onDoor = null) {
+    if (approachDoor) return { ok: false, message: "Walking to the driver’s door." }
     if (transfer)
       return { ok: false, entered: !!current, car: transfer.car, message: 'Wait for the door.' }
     if (current) {
@@ -1271,6 +1333,18 @@ export function createSimulation(scene, camera, world) {
     const car = nearestCar()
     if (!car)
       return { ok: false, entered: false, car: null, message: 'Walk closer to a parked vehicle.' }
+    const route = driverPath(car)
+    if (!route) return { ok: false, message: 'The path to the driver door is blocked.' }
+    if (route.length > 1 || distance(player, route[0]) > 0.32) {
+      seat = player.seated = false
+      vx = vz = 0
+      approachDoor = { car, route, stalled: 0, onDoor }
+      return { ok: true, entered: true, approaching: true, car }
+    }
+    return beginEntry(car)
+  }
+
+  function beginEntry(car) {
     startTransfer(car, 'enter', player)
     current = car
     car.speed = car.steer = 0
@@ -1294,7 +1368,7 @@ export function createSimulation(scene, camera, world) {
     return current ? driverView : first
   }
   function jump() {
-    if (!current && !transfer && !seat && player.grounded) {
+    if (!current && !approachDoor && !transfer && !seat && player.grounded) {
       vertical = 6.25
       player.grounded = false
       return true
@@ -1325,6 +1399,7 @@ export function createSimulation(scene, camera, world) {
     pendingX = 0,
     pendingY = 0
   function reset() {
+    approachDoor = null
     transfer?.car.model.setDoorOpen?.(0)
     transfer = null
     avatar.group.scale.setScalar(1)
@@ -1441,7 +1516,8 @@ export function createSimulation(scene, camera, world) {
     const lookY =
       (input.lookY || 0) * sense +
       (Number(keys.has('ArrowDown')) - Number(keys.has('ArrowUp'))) * 1.15 * dt
-    if (current) updateDrive(dt, transfer ? transferKeys : keys, settings, lookX, lookY, wet)
+    if (approachDoor) walkToDoor(dt, settings)
+    else if (current) updateDrive(dt, transfer ? transferKeys : keys, settings, lookX, lookY, wet)
     else updateFeet(dt, transfer ? transferKeys : keys, settings, lookX, lookY)
     if (current || transfer) presentDriver(dt)
     const cropped = keys.has('MouseRight'),

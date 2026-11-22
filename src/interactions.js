@@ -406,7 +406,8 @@ export function createInteractions(scene, world, sim, story, hooks) {
     return options.sort((a, b) => a.priority - b.priority)[0] || null
   }
   function drive() {
-    const result = sim.enterExit()
+    const result = sim.enterExit(() => hooks.sound('door'))
+    if (result?.approaching) return hooks.notify('Walking to the driver door')
     if (result?.ok) {
       hooks.sound('door')
       hooks.notify(

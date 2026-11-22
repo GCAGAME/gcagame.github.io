@@ -183,10 +183,11 @@ for (const [kind, progress] of [
   assert.equal(avatar.active.getClip().name, kind)
   assert(Math.abs(avatar.active.time / avatar.active.getClip().duration - progress) < 0.001)
 }
+let entryObstacle = () => false
 const scene = new THREE.Scene()
 const sim = createSimulation(scene, new THREE.PerspectiveCamera(68, 1, 0.1, 500), {
   height: () => 0,
-  blocked: () => false,
+  blocked: (...args) => entryObstacle(...args),
   candidates: () => [],
   signalOpen: () => true,
   locations: { depot: { x: 14, z: -94 } },
@@ -212,6 +213,8 @@ car.model.setDoorOpen = (v) => {
   setDoor?.(v)
 }
 assert(sim.enterExit().entered)
+for (let i = 0; i < 400 && !sim.vehicle; i++) frame()
+assert.equal(sim.vehicle, car)
 for (let i = 0; i < 82; i++) frame()
 assert(peak > 0.98 && door < 0.001)
 assert(scene.getObjectByName('Player').visible)
@@ -238,8 +241,8 @@ for (const car of sim.cars) {
     const saved = save.cars.find((v) => v.id === car.id)
     Object.assign(saved, { x: -140, z: 40, yaw: 0.6 })
     Object.assign(save.player, {
-      x: saved.x - 1.65 * Math.cos(0.6),
-      z: saved.z + 1.65 * Math.sin(0.6),
+      x: saved.x + 1.65 * Math.cos(0.6),
+      z: saved.z - 1.65 * Math.sin(0.6),
       y: 0,
     })
     sim.restore(save)
@@ -247,7 +250,19 @@ for (const car of sim.cars) {
     assert(result.ok && result.car === car)
     const start = [car.x, car.z, car.yaw]
     const update = (keys) => sim.update(1 / fps, { keys, settings: { quality: 'high' } })
-    for (let i = 0; i < Math.floor(1.24 * fps); i++) {
+    assert(result.approaching)
+    let lastSide = Infinity
+    for (let i = 0; i < 10 * fps && !sim.vehicle; i++) {
+      const dx = sim.player.x - car.x, dz = sim.player.z - car.z
+      lastSide = dx * Math.cos(car.yaw) - dz * Math.sin(car.yaw)
+      const along = dx * Math.sin(car.yaw) + dz * Math.cos(car.yaw)
+      assert(Math.abs(lastSide) > car.spec.width / 2 || Math.abs(along) > car.spec.length / 2)
+      assert.equal(car.speed, 0)
+      update(input)
+    }
+    assert.equal(sim.vehicle, car)
+    assert(lastSide < -car.spec.width / 2)
+    for (let i = 0; i < Math.floor(1.15 * fps); i++) {
       update(i % 2 ? input : new Set(['KeyS', 'KeyD']))
       assert.equal(car.speed, 0)
       assert.deepEqual([car.x, car.z, car.yaw], start)
@@ -303,3 +318,22 @@ for (const car of sim.cars) {
 console.log(
   'PASS five vehicles at 15/30/60/120 FPS: entry lock, driving, seated knees and floor/roof clearance.',
 )
+
+// A wall beyond the hood leaves only the rear route. Blocking both ends denies entry.
+const barrierSave = structuredClone(parkedFleet)
+Object.assign(barrierSave.cars[0], { x: -140, z: 40, yaw: 0 })
+Object.assign(barrierSave.player, { x: -138.3, z: 40, y: 0 })
+entryObstacle = (x, z) => z < 38
+sim.restore(barrierSave)
+assert(sim.enterExit().approaching)
+let rear = false
+for (let i = 0; i < 600 && !sim.vehicle; i++) {
+  frame()
+  if (sim.player.z > 42.3) rear = true
+}
+assert(rear && sim.vehicle === sim.cars[0])
+sim.restore(barrierSave)
+entryObstacle = (x, z) => z < 38 || z > 42
+assert.equal(sim.enterExit().ok, false)
+assert.equal(sim.vehicle, null)
+console.log('PASS obstructed front approach routes behind the car; two blocked ends deny entry.')

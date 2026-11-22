@@ -80,6 +80,7 @@ for (let i = 0; i < 5; i++) step(set(), 7)
 for (let i = 0; i < 100 && !sim.nearestCar(); i++) step(set('KeyW'))
 while (campaign.state.step < 2 && frame < 160) step(set('KeyW'))
 assert(sim.enterExit().entered)
+for (let i = 0; i < 400 && !sim.vehicle; i++) step()
 step()
 assert.equal(campaign.state.step, 3)
 function drive(points, speed = 7.8) {
@@ -188,6 +189,7 @@ restored.player.z = -239
 restored.player.y = world.height(5.4, -239)
 sim.restore(restored)
 assert(sim.enterExit().entered)
+for (let i = 0; i < 400 && !sim.vehicle; i++) step()
 assert.equal(sim.vehicle.type, 'offroad')
 assert(
   drive(
@@ -269,7 +271,7 @@ assert(
       [1, -176, 3],
       [-5, -182, 3],
       [-48, -182.2],
-      [-60, -181, 3],
+      [-64.2, -182, 1.6],
       [-65, -174, 3],
       [-66.2, -153],
       [-66.2, -94],

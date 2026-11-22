@@ -46,7 +46,7 @@ with sync_playwright() as pw:
         }))
       }));
       const lake={x:139,z:-119};go(lake);sim.update(.05,{keys:new Set(),settings});const swim=sim.player.swimming&&sim.player.y>=world.height(lake.x,lake.z);
-      const car=sim.cars[0];go({x:car.x+1.8,z:car.z});const enter=sim.enterExit().entered;const f=sim.firstPerson;sim.toggleCamera();const cabin=sim.firstPerson!==f;sim.toggleLights();const lights=car.headlights;for(let i=0;i<80;i++)sim.update(1/60,{settings});const exit=sim.enterExit().ok;
+      const car=sim.cars[0];go({x:car.x+1.8,z:car.z});const enter=sim.enterExit().entered;for(let i=0;i<480&&!sim.vehicle;i++)sim.update(1/60,{settings});const f=sim.firstPerson;sim.toggleCamera();const cabin=sim.firstPerson!==f;sim.toggleLights();const lights=car.headlights;for(let i=0;i<80;i++)sim.update(1/60,{settings});const exit=sim.enterExit().ok;
       climate.state.hour=0;climate.update(.03,sim.player,briar.camera,settings,world);const dark=climate.state.night;
       climate.state.hour=12;climate.update(.03,sim.player,briar.camera,settings,world);const bright=!climate.state.night;
       const graph=briar.navigation.route(world.locations.home,world.locations.summit);
