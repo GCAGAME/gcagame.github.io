@@ -225,3 +225,81 @@ assert(door < 0.001)
 console.log(
   'PASS rig streaming, independent skeletons, shared geometry/materials, LOD, clothing, vehicle entry/exit, exterior and driver cameras, contact roles.',
 )
+
+// Hold real controls through the handoff and measure the skinned player in each cabin.
+const playerMesh = scene.getObjectByName('Player')
+const input = new Set(['KeyW', 'KeyA'])
+const parkedFleet = sim.serialize()
+for (const car of sim.cars) {
+  for (const fps of [15, 30, 60, 120]) {
+    const save = structuredClone(parkedFleet)
+    save.current = null
+    save.driverView = false
+    const saved = save.cars.find((v) => v.id === car.id)
+    Object.assign(saved, { x: -140, z: 40, yaw: 0.6 })
+    Object.assign(save.player, {
+      x: saved.x - 1.65 * Math.cos(0.6),
+      z: saved.z + 1.65 * Math.sin(0.6),
+      y: 0,
+    })
+    sim.restore(save)
+    const result = sim.enterExit()
+    assert(result.ok && result.car === car)
+    const start = [car.x, car.z, car.yaw]
+    const update = (keys) => sim.update(1 / fps, { keys, settings: { quality: 'high' } })
+    for (let i = 0; i < Math.floor(1.24 * fps); i++) {
+      update(i % 2 ? input : new Set(['KeyS', 'KeyD']))
+      assert.equal(car.speed, 0)
+      assert.deepEqual([car.x, car.z, car.yaw], start)
+    }
+    assert.equal(sim.enterExit().ok, false)
+    // Give the production loader a turn even in a synchronous simulation run.
+    await new Promise((resolve) => setImmediate(resolve))
+    for (let i = 0; i < Math.ceil(0.35 * fps); i++) update(input)
+    assert(car.speed > 0.1 && Math.hypot(car.x - start[0], car.z - start[1]) > 0.01)
+    scene.updateMatrixWorld(true)
+    const toCabin = car.model.group.matrixWorld.clone().invert()
+    const vertex = new THREE.Vector3()
+    const bounds = new THREE.Box3()
+    let vertices = 0
+    playerMesh.getObjectByName('Detail').traverse((mesh) => {
+      if (!mesh.isSkinnedMesh) return
+      for (let i = 0; i < mesh.geometry.attributes.position.count; i++) {
+        mesh.getVertexPosition(i, vertex).applyMatrix4(mesh.matrixWorld).applyMatrix4(toCabin)
+        bounds.expandByPoint(vertex)
+        vertices++
+      }
+    })
+    assert(vertices > 1000)
+    const footwell = car.spec.wheel * 0.65
+    assert(
+      bounds.min.y >= footwell - 0.012 && bounds.max.y < car.spec.roof - 0.045,
+      car.id + ' ' + fps + ' fps: driver y=' + bounds.min.y + '..' + bounds.max.y,
+    )
+    for (const side of ['L', 'R']) {
+      const joint = (name) =>
+        playerMesh
+          .getObjectByName('Bip01_' + side + '_' + name)
+          .getWorldPosition(new THREE.Vector3())
+          .applyMatrix4(toCabin)
+      const hip = joint('Thigh'),
+        knee = joint('Calf'),
+        ankle = joint('Foot')
+      assert(
+        knee.z < hip.z - 0.17 && ankle.y < knee.y - 0.09 && ankle.z < knee.z - 0.1,
+        car.id + ' legs',
+      )
+    }
+    if (fps === 60)
+      console.log(
+        car.name,
+        'driver height above chassis datum',
+        bounds.min.y.toFixed(3),
+        'to',
+        bounds.max.y.toFixed(3),
+      )
+  }
+}
+console.log(
+  'PASS five vehicles at 15/30/60/120 FPS: entry lock, driving, seated knees and floor/roof clearance.',
+)

@@ -14,6 +14,53 @@ class CharacterGroup extends THREE.Group {
   }
 }
 
+// Adapt the shipped seated pose to pedals and wheel in the rig's local forward (+Z).
+// Bake once when the player's rig loads; normal driving only samples the resulting clip.
+function driverPose(character, seatClip) {
+  const mixer = new THREE.AnimationMixer(character)
+  mixer.clipAction(seatClip).play()
+  mixer.update(0.3)
+  const bones = []
+  character.traverse((o) => {
+    if (o.isBone) bones.push(o)
+  })
+  function aim(from, to, direction) {
+    const a = bones.find((b) => b.name.endsWith(from)),
+      b = bones.find((b) => b.name.endsWith(to))
+    const parentInverse = a.parent.getWorldQuaternion(new THREE.Quaternion()).invert()
+    const along = b
+      .getWorldPosition(new THREE.Vector3())
+      .sub(a.getWorldPosition(new THREE.Vector3()))
+    const rotation = new THREE.Quaternion().setFromUnitVectors(
+      along.normalize().applyQuaternion(parentInverse),
+      new THREE.Vector3(...direction).normalize().applyQuaternion(parentInverse),
+    )
+    a.quaternion.premultiply(rotation)
+  }
+  for (const [side, spread] of [
+    ['L', 0.1],
+    ['R', -0.1],
+  ]) {
+    aim(side + '_Thigh', side + '_Calf', [spread, 0.03, 1])
+    aim(side + '_Calf', side + '_Foot', [0, -0.58, 0.82])
+    aim(side + '_UpperArm', side + '_Forearm', [spread, -0.78, 0.55])
+    aim(side + '_Forearm', side + '_Hand', [-spread, 0.4, 0.9])
+  }
+  character.updateMatrixWorld(true)
+  const bounds = new THREE.Box3().setFromObject(character, true)
+  const tracks = bones.flatMap((b) => [
+    new THREE.VectorKeyframeTrack(b.name + '.position', [0], b.position.toArray()),
+    new THREE.QuaternionKeyframeTrack(b.name + '.quaternion', [0], b.quaternion.toArray()),
+  ])
+  mixer.stopAllAction()
+  mixer.uncacheRoot(character)
+  return {
+    clip: new THREE.AnimationClip('driver', 1, tracks),
+    bottom: bounds.min.y,
+    top: bounds.max.y,
+  }
+}
+
 function loadResident(model) {
   if (!library.has(model.style)) {
     const path = './assets/people/' + model.style + '.glb'
@@ -21,6 +68,10 @@ function loadResident(model) {
   }
   return library.get(model.style).then((asset) => {
     const character = cloneCharacter(asset.scene)
+    if (!model.npc) {
+      const seat = asset.animations.find((clip) => clip.name === 'seat')
+      model.driverPose = driverPose(character, seat)
+    }
     character.rotation.y = Math.PI
     model.character = character
     model.group.add(character)
@@ -44,9 +95,11 @@ function loadResident(model) {
       clip.userData = asset.parser.json.animations[i].extras || {}
       model.actions[clip.name] = model.mixer.clipAction(clip)
     }
+    if (model.driverPose) model.actions.driver = model.mixer.clipAction(model.driverPose.clip)
     model.ready = true
     setPersonDetail(model, model.detailed, model.shadow)
-    posePerson(model, 0, 0, { idle: true })
+    posePerson(model, 0, model.pendingSpeed || 0, model.pendingPose)
+    model.pendingPose = null
     return model
   })
 }
@@ -94,6 +147,8 @@ export function posePerson(model, dt, speed, state = {}) {
   if (!model.group.visible) return
   // Defer texture decoding and skeleton allocation until the actor is first in view.
   if (!model.ready) {
+    model.pendingPose = state
+    model.pendingSpeed = speed
     if (!model.loading && typeof document !== 'undefined')
       model.loading = loadResident(model).catch((error) =>
         console.error('Character asset:', model.style, error),
@@ -102,7 +157,7 @@ export function posePerson(model, dt, speed, state = {}) {
   }
   const pivot = Math.abs(state.turn || 0) > 0.85 && speed < 0.45
   const mode =
-    state.transfer ||
+    (state.driver && 'driver') || state.transfer ||
     (state.seat
       ? 'seat'
       : state.crouch
@@ -124,7 +179,8 @@ export function posePerson(model, dt, speed, state = {}) {
     const last = model.active
     // Restore the action's weight after a previous cross-fade faded it out.
     action.reset().setEffectiveWeight(1).play()
-    if (last) action.crossFadeFrom(last, 0.18, false)
+    if (last && mode === 'driver' && last !== model.actions.enter) last.stop()
+    else if (last) action.crossFadeFrom(last, 0.18, false)
     else if (mode === 'idle') action.time = (model.index * 0.47) % action.getClip().duration
     model.active = action
   }

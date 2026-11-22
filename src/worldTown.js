@@ -272,6 +272,20 @@ export function populateTown(w) {
   }
   // Animated leaves of a door have their own mesh, while everything around
   // them stays in the neighborhood's static buffers.
+  standard('utilityLight', { color: 0xffefdb, emissive: 0xffdfa9, emissiveIntensity: 1.05 })
+  const doorHardware = new THREE.MeshStandardMaterial({
+    color: 0xb0b2a7,
+    metalness: 0.67,
+    roughness: 0.36,
+  })
+  const doorWindow = new THREE.MeshStandardMaterial({
+    color: 0xc1d5d0,
+    transparent: true,
+    opacity: 0.27,
+    depthWrite: false,
+    roughness: 0.17,
+  })
+  const rubber = new THREE.MeshStandardMaterial({ color: 0x353c38, roughness: 0.86 })
   function door(
     x,
     z,
@@ -288,33 +302,44 @@ export function populateTown(w) {
     group.position.set(x - wide / 2, base, z)
     scene.add(group)
     const material = new THREE.MeshStandardMaterial({ color, roughness: 0.64 })
-    const panel = new THREE.Mesh(new THREE.BoxGeometry(wide, tall, 0.105), material)
-    panel.position.set(wide / 2, tall / 2, 0)
-    panel.castShadow = panel.receiveShadow = true
-    group.add(panel)
-    if (!roll) {
-      const glass = new THREE.Mesh(
-        new THREE.BoxGeometry(wide * 0.57, 0.63, 0.025),
-        new THREE.MeshStandardMaterial({ color: 0x769197, roughness: 0.27, metalness: 0.28 }),
-      )
-      glass.position.set(wide * 0.5, tall * 0.72, face * 0.07)
-      group.add(glass)
-      const handle = new THREE.Mesh(
-        new THREE.BoxGeometry(0.115, 0.15, 0.13),
-        new THREE.MeshStandardMaterial({ color: 0xcfb98a, metalness: 0.65, roughness: 0.42 }),
-      )
-      handle.position.set(wide * 0.83, 1.03, face * 0.1)
-      group.add(handle)
-    } else {
-      for (let k = 0; k < 6; k++) {
-        const seam = new THREE.Mesh(
-          new THREE.BoxGeometry(wide - 0.1, 0.022, 0.025),
-          new THREE.MeshStandardMaterial({ color: 0x8f9286, roughness: 0.7 }),
-        )
-        seam.position.set(wide / 2, (tall * (k + 0.5)) / 6, face * 0.067)
-        group.add(seam)
-      }
+    const fittings = new THREE.Group()
+    function part(cx, cy, cz, width, h, depth, mat) {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(width, h, depth), mat)
+      mesh.position.set(cx, cy, cz)
+      mesh.castShadow = mat !== doorWindow
+      mesh.receiveShadow = true
+      if (mat === doorHardware || mat === rubber) fittings.add(mesh)
+      else group.add(mesh)
     }
+    const mid = wide / 2,
+      stile = Math.min(0.17, wide * 0.13)
+    // Build a real opening in the leaf so the glazing reads from either side.
+    const sill = roll ? tall * 0.66 : tall * 0.46,
+      head = roll ? tall * 0.82 : tall * 0.89
+    part(mid, sill / 2, 0, wide, sill, 0.105, material)
+    part(mid, (head + tall) / 2, 0, wide, tall - head, 0.105, material)
+    for (const xx of [stile / 2, wide - stile / 2])
+      part(xx, (sill + head) / 2, 0, stile, head - sill, 0.105, material)
+    part(mid, (sill + head) / 2, 0, wide - 2 * stile, head - sill, 0.022, doorWindow)
+    for (const yy of [sill, head]) part(mid, yy, 0, wide - 2 * stile, 0.034, 0.087, rubber)
+    if (roll) {
+      for (let i = 1; i < 5; i++)
+        part(mid, (tall * i) / 6, 0.054, wide - 0.06, 0.027, 0.013, rubber)
+      for (let i = 1; i < 6; i++)
+        part((wide * i) / 6, (head + sill) / 2, 0, 0.067, head - sill, 0.085, material)
+      part(mid, 0.12, face * 0.08, 0.43, 0.048, 0.08, doorHardware)
+    } else {
+      for (const f of [-1, 1]) {
+        part(wide - 0.12, 1.0, f * 0.061, 0.13, 0.26, 0.022, doorHardware)
+        part(wide - 0.175, 1.04, f * 0.086, 0.19, 0.043, 0.055, doorHardware)
+        part(mid, 0.18, f * 0.054, wide - 0.13, 0.24, 0.012, doorHardware)
+      }
+      for (const yy of [0.29, tall - 0.33]) part(0.033, yy, 0, 0.065, 0.13, 0.126, doorHardware)
+    }
+    for (const dx of [-1, 1])
+      box(x + dx * (mid + 0.035), base, z, 0.07, tall + 0.055, 0.24, 'metal', 0x667169)
+    box(x, base + tall, z, wide + 0.14, 0.066, 0.24, 'metal', 0x667169)
+    group.add(fittings)
     let open = false
     const motion = movingDoor(w, group, x, z, base, wide, tall, face, roll)
     const obj = {
@@ -345,11 +370,8 @@ export function populateTown(w) {
     }
     interactables.push(obj)
     dynamic.push((dt, tick) => {
-      if (tick) {
-        const near = (x - w.observer.x) ** 2 + (z - w.observer.z) ** 2 < 39 ** 2
-        for (let i = 1; i < group.children.length; i++) group.children[i].visible = near
-      }
       motion.advance(Number(open), dt)
+      if (tick) fittings.visible = Math.hypot(w.observer.x - x, w.observer.z - z) < 42
     })
     return obj
   }
@@ -392,13 +414,68 @@ export function populateTown(w) {
         rectangle((start + end) / 2, frontZ, end - start, 0.2, 0, h)
       }
       box(opening, 2.16, frontZ, threshold, h - 2.16, 0.2, wallMat, tint)
-      plate(x, 0.36, z, wid - 0.2, dep - 0.2, 'wood', 0xb8a989)
-      w.floors.push({ x, z, w: wid - 0.22, d: dep - 0.22, level: () => 0.36 })
+      // Keep the finish above the concrete foundation; both previously met at 0.36 m.
+      const floorTop = 0.373
+      plate(x, floorTop, z, wid - 0.2, dep - 0.2, 'wood', 0xcdbb9e)
+      box(x, 3.16, z, wid - 0.17, 0.11, dep - 0.17, 'solid', 0xe9e3d5)
+      const backZ = z - front * (dep / 2 - 0.125)
+      box(x, floorTop, backZ, wid - 0.2, 2.8, 0.04, 'solid', 0xb4baaa)
+      box(x, floorTop, backZ + front * 0.04, wid - 0.2, 0.12, 0.06, 'wood', frame)
+      for (const side of [-1, 1]) {
+        const innerX = x + side * (wid / 2 - 0.12)
+        box(innerX, floorTop, z, 0.04, 2.8, dep - 0.2, 'solid', 0xd8cbba)
+        box(innerX - side * 0.043, floorTop, z, 0.06, 0.12, dep - 0.2, 'wood', frame)
+      }
+      // A framed pair of landscape prints on the wall above the coffee table.
+      for (const [i, sky] of [0x9bb7b9, 0xcbb797].entries()) {
+        const xx = x + 0.42 + 1.17 * i, zz = backZ + front * 0.05
+        box(xx, 1.36, zz, 1.03, 0.83, 0.06, 'wood', 0x886747)
+        box(xx, 1.42, zz + front * 0.04, 0.92, 0.71, 0.035, 'solid', sky)
+        const faceZ = zz + front * 0.061
+        const ridge = [[xx-0.46,1.42,faceZ],[xx+0.46,1.42,faceZ],[xx+0.46,1.70,faceZ],
+          [xx+0.16,1.87+i*.05,faceZ],[xx-0.06,1.69,faceZ],[xx-.29,1.8,faceZ],[xx-.46,1.66,faceZ]]
+        poly(front > 0 ? ridge : ridge.reverse(), 'solid', i ? 0x687a70 : 0x718882)
+      }
+      w.floors.push({ x, z, w: wid - 0.22, d: dep - 0.22, level: () => floorTop })
       w.interiors.push({ x, z, w: wid - 0.1, d: dep - 0.1 })
       // A furnished living room sits behind the working front door.
-      box(x - 2, 0.35, z - 0.3, 2.35, 0.35, 1.1, 'siding', 0x808b7e)
-      box(x - 2, 0.64, z - 0.7, 2.35, 0.57, 0.29, 'siding', 0x758173)
+      box(x - 2, 0.4, z - 0.3, 2.29, 0.24, 1.04, 'solid', 0x677669)
+      for (const dx of [-0.51, 0.51]) {
+        box(x - 2 + dx, 0.64, z - 0.22, 1.0, 0.17, 0.73, 'solid', 0x8d9b88)
+        box(x - 2 + dx, 0.8, z - 0.61, 1.0, 0.38, 0.19, 'solid', 0x82917d)
+      }
+      box(x - 2, 0.64, z - 0.7, 2.35, 0.57, 0.29, 'solid', 0x758173)
       box(x - 2, 0.37, z + 1.2, 1.3, 0.35, 0.66, 'wood', 0xccad86)
+      // Reading corner against the rear wall, clear of the route from the porch.
+      const shelfZ = z - front * (dep / 2 - 0.45),
+        shelfX = x - 2.3
+      for (const yy of [0.45, 1.02, 1.59, 2.16])
+        box(shelfX, yy, shelfZ, 2.35, 0.075, 0.54, 'wood', 0xb68d67)
+      for (const dx of [-1.14, 1.14])
+        box(shelfX + dx, 0.36, shelfZ, 0.085, 1.9, 0.54, 'wood', 0xa77d57)
+      for (let row = 0; row < 3; row++)
+        for (let k = 0; k < 10; k++)
+          box(
+            shelfX - 0.94 + k * 0.17,
+            0.525 + row * 0.57,
+            shelfZ,
+            0.13,
+            0.27 + (k % 3) * 0.055,
+            0.32,
+            'solid',
+            [0x6a8076, 0xa46b50, 0xb79e76, 0x56697a][(row + k) % 4],
+          )
+      rectangle(shelfX, shelfZ, 2.35, 0.54, 0.36, 2.26)
+      plate(x - 2, floorTop + .006, z + 0.45, 3.7, 2.75, 'solid', 0x978774)
+      for (const dx of [-1, 1])
+        box(x - 2 + dx * 1.09, 0.69, z - 0.3, 0.21, 0.27, 0.95, 'solid', 0x899386)
+      rectangle(x - 2, z - 0.3, 2.35, 1.1, 0.36, 1.2)
+      rectangle(x - 2, z + 1.2, 1.3, 0.66, 0.36, 0.72)
+      const lampX = x - 0.35
+      rod([lampX, 0.36, z - 0.62], [lampX, 0.43, z - 0.62], 0.24, 0.24, 'metal', iron)
+      rod([lampX, 0.42, z - 0.62], [lampX, 1.64, z - 0.62], 0.032, 0.032, 'metal', iron)
+      rod([lampX, 1.52, z - 0.62], [lampX, 1.84, z - 0.62], 0.28, 0.19, 'solid', 0xdac7a3)
+      rectangle(lampX, z - 0.62, 0.48, 0.48, 0.36, 1.84)
       door(opening, frontZ, front, 0x80674c, 'house door')
     }
     gable(x, h, z, wid + 0.35, dep + 0.22, stories === 2 ? 2.05 : 2.36, tint)
@@ -421,6 +498,11 @@ export function populateTown(w) {
       box(entryX, 0.24, frontZ + front * 0.075, 1.22, 2.16, 0.12, 'solid', frame)
       box(entryX, 0.24, frontZ + front * 0.14, 1.02, 2.03, 0.05, 'wood', 0xb4a285)
       box(entryX, 0.99, frontZ + front * 0.18, 0.55, 0.79, 0.025, 'pane', 0xebede8)
+      const faceZ = frontZ + front * 0.19
+      for (const yy of [0.92, 1.78]) box(entryX, yy, faceZ, 0.65, 0.055, 0.045, 'wood', frame)
+      for (const dx of [-0.3, 0.3]) box(entryX + dx, 0.96, faceZ, 0.05, 0.82, 0.045, 'wood', frame)
+      box(entryX + 0.38, 1.02, faceZ, 0.09, 0.2, 0.05, 'metal', iron)
+      box(entryX + 0.33, 1.13, faceZ + front * 0.042, 0.15, 0.035, 0.048, 'metal', iron)
     }
     windowPane(x - wid * 0.26, 1.02, frontZ, 1.74, 1.26, front, index % 2 === 0)
     for (const side of [-1, 1])
@@ -483,6 +565,28 @@ export function populateTown(w) {
         box(gX, 0, gz - (front * gd) / 2, gw, gh, 0.2, 'siding', tint)
         rectangle(gX, gz - (front * gd) / 2, gw, 0.2, 0, gh)
         plate(gX, 0.034, gz, gw, gd, 'concrete', 0xaaa99c)
+        box(gX, gh - 0.06, gz, gw - 0.18, 0.09, gd - 0.15, 'solid', 0xbebfb3)
+        for (const zz of [gz-1.65, gz+1.65]) {
+          box(gX, gh-.14, zz, 1.64, .08, .18, 'metal', iron)
+          box(gX, gh-.155, zz, 1.52, .025, .13, 'utilityLight')
+        }
+        const back = gz - front * (gd / 2 - .14)
+        box(gX, 1.06, back, gw - .62, 1.31, .09, 'wood', 0xb29873)
+        for (let i = 0; i < 7; i++) {
+          const xx = gX - 1.75 + .49*i
+          box(xx, 1.47, back+front*.075, .045, .4+(i%3)*.09, .07, 'metal', 0xacb4ae)
+          box(xx, 1.43, back+front*.079, .083, .17, .08, 'solid', i%2?0x986e4c:0x607770)
+        }
+        const benchZ = gz - front * (gd / 2 - 0.55)
+        box(gX, 0.04, benchZ, gw - 0.52, 0.82, 0.76, 'metal', 0x61736e)
+        box(gX, 0.86, benchZ, gw - 0.4, 0.12, 0.84, 'wood', 0xc0946f)
+        rectangle(gX, benchZ, gw - 0.4, 0.84, 0, 0.98)
+        for (const dx of [-0.75, 0, 0.75]) {
+          box(gX + dx, 0.98, benchZ, 0.52, 0.25, 0.32, 'metal', 0x895e49)
+          box(gX + dx, 1.23, benchZ, 0.22, 0.064, 0.09, 'metal', iron)
+          for (const yy of [0.27, 0.56])
+            box(gX + dx, yy, benchZ + front * 0.39, 0.38, 0.034, 0.04, 'metal', frame)
+        }
         door(gX, gFront, front, 0xb9beb4, 'garage door', 'garage', gw - 0.21, gh - 0.13, true)
         w.interiors.push({ x: gX, z: gz, w: gw - 0.1, d: gd - 0.1 })
       } else {
@@ -884,6 +988,34 @@ export function populateTown(w) {
     }
     for (const xx of [17.8, 25.1, 30.2]) box(xx, 0.12, -104, 0.1, 3.15, 1.4, 'metal', iron)
     for (let k = 0; k < 3; k++) box(24, 0.93 + k * 0.93, -104, 13, 0.1, 1.4, 'wood', 0xb1a07e)
+    for (const xx of [15.5, 22, 28.5]) {
+      for (const zz of [-93.8, -101.5]) {
+        box(xx, h-.14, zz, 2.3, .14, .34, 'metal', iron)
+        box(xx, h-.17, zz, 2.18, .04, .25, 'utilityLight')
+      }
+    }
+    // A waist-high writing ledge with outgoing envelopes along the lobby wall.
+    box(32.95, .11, -94.8, .93, .93, 3.45, 'wood', 0xb39774)
+    box(32.95, 1.04, -94.8, 1.06, .07, 3.55, 'solid', 0xd5c7a9)
+    for (let i=0;i<3;i++) box(32.87,1.11,-95.8+i*.61,.33,.034,.22,'solid',0xece5cf)
+    rectangle(32.95,-94.8,1.06,3.55,.11,1.12)
+    // Sorting shelves, taped parcels, wall pigeonholes and a counter scale.
+    for (let level = 0; level < 3; level++)
+      for (let i = 0; i < 8; i++) {
+        const px = 18.4 + i * 1.52,
+          py = 1.03 + level * 0.93,
+          ph = 0.32 + ((i + level) % 3) * 0.11
+        box(px, py, -104, 1.02, ph, 0.77, 'solid', 0xbf956d)
+        box(px, py + ph, -104, 0.15, 0.01, 0.78, 'solid', 0xd8bc91)
+        box(px + 0.18, py + 0.11, -103.61, 0.31, 0.13, 0.012, 'solid', 0xe6dfcb)
+      }
+    rectangle(24, -104, 13, 1.4, 0.11, 3.57)
+    for (let i = 0; i < 9; i++) box(26 + i * 0.68, 1.4, -105.68, 0.055, 1.4, 0.48, 'wood', 0xaf8866)
+    for (let i = 0; i < 4; i++)
+      box(28.72, 1.4 + i * 0.45, -105.68, 5.51, 0.055, 0.48, 'wood', 0xc19770)
+    box(21.3, 1.15, -98, 0.67, 0.12, 0.54, 'metal', iron)
+    box(21.3, 1.27, -98, 0.59, 0.045, 0.46, 'metal', 0xa7aca6)
+    box(24.2, 1.15, -98, 0.8, 0.38, 0.49, 'solid', 0xc49a71)
     door(14, frontZ, 1, 0x627c72, 'post office door', 'door', 2.75, 2.62)
     sign(20, 1.7, -102.85, 3.8, 0.88, 'COLLECTIONS', 'PARCEL COUNTER', 0, '#e2dcc9', '#50584c')
   }
@@ -944,14 +1076,17 @@ export function populateTown(w) {
     wz = -118
   for (const sx of [-1, 1])
     for (const sz of [-1, 1]) {
-      rod(
-        [wx + sx * 2.6, 0.1, wz + sz * 2.6],
-        [wx + sx * 1.8, 9.8, wz + sz * 1.8],
-        0.19,
-        0.13,
-        'metal',
-        0x777d70,
+      const px = wx + sx * 2.6,
+        pz = wz + sz * 2.6
+      const corners = [-0.56, 0.56].flatMap((dx) =>
+        [-0.56, 0.56].map((dz) => height(px + dx, pz + dz)),
       )
+      const bottom = Math.min(...corners) - 0.2,
+        cap = Math.max(...corners) + 0.18
+      box(px, bottom, pz, 1.12, cap - bottom, 1.12, 'concrete', 0xb4b0a0)
+      box(px, cap, pz, 0.64, 0.07, 0.64, 'metal', 0x62695f)
+      rectangle(px, pz, 1.12, 1.12, bottom, cap + 0.07)
+      rod([px, cap + 0.06, pz], [wx + sx * 1.8, 9.8, wz + sz * 1.8], 0.19, 0.13, 'metal', 0x777d70)
       rod(
         [wx + sx * 2.53, 1.2, wz + sz * 2.53],
         [wx - sx * 1.88, 8.8, wz + sz * 1.88],
@@ -960,13 +1095,30 @@ export function populateTown(w) {
         'metal',
         0x697268,
       )
-      rectangle(wx + sx * 2.6, wz + sz * 2.6, 0.38, 0.38, 0, 9.9)
+      rectangle(wx + sx * 2.6, wz + sz * 2.6, 0.38, 0.38, cap, 9.9)
     }
   rod([wx, 9.14, wz], [wx, 13.9, wz], 3.4, 3.4, 'wood', 0xa68d6e, 18)
   for (const yy of [9.25, 10.0, 11.45, 12.8, 13.83])
     rod([wx, yy, wz], [wx, yy + 0.1, wz], 3.46, 3.46, 'metal', 0x5f6d65, 18)
   rod([wx, 13.94, wz], [wx, 15.3, wz], 3.61, 0.14, 'metal', 0xa5a79a, 18)
   sign(wx, 10.78, wz + 3.44, 4.15, 1.06, 'HARBOR', 'WATER DISTRICT', 0, '#a69a7d', '#353e37')
+  // Tank outlet and service ladder.
+  rod(
+    [wx + 0.84, height(wx + 0.84, wz) - 0.15, wz],
+    [wx + 0.84, 9.2, wz],
+    0.16,
+    0.16,
+    'metal',
+    0x606c65,
+    12,
+  )
+  for (const dx of [-0.28, 0.28]) {
+    rod([wx + dx, 0.36, wz - 3.59], [wx + dx, 14.1, wz - 3.59], 0.044, 0.044, 'metal', 0x95998e)
+    for (const yy of [9.6, 11.5, 13.6])
+      rod([wx + dx, yy, wz - 3.59], [wx + dx, yy, wz - 3.32], 0.045, 0.045, 'metal', 0x747b74)
+  }
+  for (let yy = 0.68; yy < 14.1; yy += 0.34)
+    rod([wx - 0.28, yy, wz - 3.59], [wx + 0.28, yy, wz - 3.59], 0.033, 0.033, 'metal', 0x919586)
   // The lift serves a real waterfront observation deck. Its platform carries
   // the character through the same height query used for all walking physics.
   function harborLift() {
@@ -979,13 +1131,14 @@ export function populateTown(w) {
     const base = height(lx, lz),
       top = base + rise
     const deck = { x: deckX, z: lz, w: deckW, d: deckD, level: () => top }
-    w.floors.push(deck)
+    const postHeight = (xx, zz) => height(xx, zz) - 0.28
     box(deckX, top - 0.18, lz, deckW, 0.18, deckD, 'wood', 0xc4ac8c)
     for (const sx of [-1, 1])
       for (const sz of [-1, 1]) {
         const xx = deckX + sx * (deckW / 2 - 0.12),
           zz = lz + sz * (deckD / 2 - 0.12)
-        box(xx, base - 0.5, zz, 0.19, rise + 1.53, 0.19, 'metal', 0x677b75)
+        const bottom = postHeight(xx, zz)
+        box(xx, bottom, zz, 0.24, top + 1.03 - bottom, 0.24, 'metal', 0x677b75)
       }
     for (const sz of [-1, 1]) {
       const zz = lz + sz * (deckD / 2 - 0.09)
@@ -993,6 +1146,7 @@ export function populateTown(w) {
       box(deckX, top + 0.42, zz, deckW, 0.045, 0.045, 'metal', 0x84928a)
       rectangle(deckX, zz, deckW, 0.1, top, top + 1)
     }
+    w.floors.push(deck)
     const east = deckX + deckW / 2 - 0.09
     for (const yy of [0.42, 0.95]) box(east, top + yy, lz, 0.08, 0.065, deckD, 'metal', 0x84928a)
     rectangle(east, lz, 0.1, deckD, top, top + 1)
@@ -1065,9 +1219,49 @@ export function populateTown(w) {
     })
   }
   harborLift()
-  for (let x = 94; x < 127; x += 1.1) box(x, -0.5, -116, 1.05, 0.22, 2.4, 'wood', 0xaaa38e)
-  for (let x = 97; x < 126; x += 4)
-    for (const z of [-114.83, -117.17]) rod([x, -5, z], [x, 0.31, z], 0.15, 0.13, 'wood', 0xa99b83)
+  // Timber landing from the shoreline to the end of the original quay.
+  const quayStart = 87,
+    quayEnd = 127,
+    quayZ = -116,
+    surface = -0.28
+  for (let i = 0; i < 160; i++) {
+    box(
+      quayStart + (i + 0.5) * 0.25,
+      surface - 0.14,
+      quayZ,
+      0.246,
+      0.14,
+      2.6,
+      'wood',
+      [0xc0a489, 0xbda186, 0xc7ad90, 0xb9a087][i % 4],
+    )
+  }
+  for (const side of [-1, 1]) {
+    const zz = quayZ + side * 1.15
+    box(107, surface - 0.43, zz, 40, 0.29, 0.18, 'wood', 0x8f7e67)
+    for (let xx = 89; xx <= 126; xx += 4) {
+      const foot = Math.min(surface - 0.5, height(xx, zz) - 0.38)
+      rod([xx, foot, zz], [xx, surface + 0.94, zz], 0.16, 0.135, 'wood', 0xac947b, 12)
+      rod([xx, surface + 0.79, zz], [xx, surface + 0.88, zz], 0.146, 0.146, 'metal', 0x676f68, 12)
+      rectangle(xx, zz, 0.28, 0.28, foot, surface + 0.94)
+      const span = Math.min(4, quayEnd - 0.15 - xx)
+      if (span > 0) {
+        for (const yy of [0.44, 0.87])
+          rod(
+            [xx, surface + yy, zz],
+            [xx + span, surface + yy, zz],
+            0.036,
+            0.036,
+            'metal',
+            0x7f8881,
+          )
+        rectangle(xx + span / 2, zz, span, 0.085, surface, surface + 0.9)
+      }
+    }
+  }
+  box(126.85, surface + 0.78, quayZ, 0.12, 0.1, 2.55, 'wood', 0xbc9f80)
+  rectangle(126.85, quayZ, 0.12, 2.55, surface, surface + 0.88)
+  w.floors.push({ x: 107, z: quayZ, w: 40, d: 2.6, level: () => surface, aboveWater: true })
   // Bus shelter, seats and municipal furniture by the main arterial.
   function shelter(x, z) {
     for (const dx of [-1.68, 1.68]) {
