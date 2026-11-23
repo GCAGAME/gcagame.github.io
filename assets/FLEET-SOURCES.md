@@ -4,7 +4,7 @@ The five close vehicle models and their distant counterparts derive from the fol
 
 | GCA vehicle | Source model | Close triangles | Distant triangles |
 | --- | --- | ---: | ---: |
-| Meridian S4 | [Family Sedan](https://tevy.dev/models/family-sedan) | 22,302 | 1,299 |
+| Meridian S4 | [Family Sedan](https://tevy.dev/models/family-sedan) | 27,316 | 1,299 |
 | Boreal Touring | [SUV](https://tevy.dev/models/suv) | 9,322 | 763 |
 | Veloce GT | [Supercar](https://tevy.dev/models/supercar) | 23,145 | 1,300 |
 | Range C150 | [Pickup Truck](https://tevy.dev/models/pickup-truck) | 10,027 | 819 |
