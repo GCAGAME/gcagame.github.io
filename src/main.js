@@ -8,6 +8,7 @@ import { createClimate } from './climate.js'
 import { createRendering } from './rendering.js'
 import { createCampaign } from './campaign.js'
 import { createInteractions } from './interactions.js'
+import { createGamepad } from './gamepad.js'
 import { createAudio } from './audio.js'
 import { loadCompressedSurfaces } from './surfaces.js'
 import { createSurvival } from './survival.js'
@@ -15,7 +16,8 @@ import { showroomPreview } from './showroom-preview.js'
 
 const canvas = document.getElementById('game'),
   edgeNotice = document.getElementById('world-edge'),
-  audio = createAudio()
+  audio = createAudio(),
+  gamepad = createGamepad()
 const defaultSettings = {
   quality: 'Medium',
   resolution: 1,
@@ -39,6 +41,7 @@ const defaultSettings = {
   timeScale: 12,
   weather: 'Auto',
   volume: 0.55,
+  vibration: true,
   adaptive: true,
 }
 const presets = {
@@ -182,6 +185,8 @@ const ui = createUI({
   continue: () => loadGame(false),
   resume,
   save: () => saveGame(true),
+  controllerSpeaker: async () => info(await audio.toggleControllerSpeaker()),
+  speakerEnabled: () => audio.speakerEnabled,
   exportJourney,
   importJourney,
   load: () => loadGame(true),
@@ -305,6 +310,7 @@ function refresh(redraw = false) {
   if (redraw && ['inventory', 'shop', 'objectives', 'map'].includes(screen)) ui.panel(screen, data)
 }
 function clearInput() {
+  gamepad.quiet()
   keys.clear()
   lookX = lookY = 0
 }
@@ -687,9 +693,11 @@ function onKey(e, down) {
   )
     e.preventDefault()
   keys.add(e.code)
-  if (e.repeat) return
-  if (sim.seated && ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space'].includes(e.code)) interactions.stand()
-  switch (e.code) {
+  if (!e.repeat) pressAction(e.code)
+}
+function pressAction(code) {
+  if (sim.seated && ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space'].includes(code)) interactions.stand()
+  switch (code) {
     case 'Escape':
       openPanel('pause')
       break
@@ -769,6 +777,7 @@ document.addEventListener('mouseup', (e) => {
 })
 canvas.addEventListener('contextmenu', (e) => e.preventDefault())
 function suspend() {
+  gamepad.poll(false, () => {})
   clearInput()
   if (ready && active && screen === 'hud') {
     saveGame(false)
@@ -802,6 +811,14 @@ let previousFrame = 0,
   lastRender = 0
 function frame(now) {
   requestAnimationFrame(frame)
+  const previousScreen = screen
+  const pad = gamepad.poll(ready && !document.hidden && document.hasFocus(), code => {
+    if (screen !== previousScreen) return
+    if (screen === 'hud') pressAction(code)
+    else if (code === 'Escape' || code === 'KeyF' || (screen === 'map' && code === 'KeyM'))
+      closePanel()
+    else ui.menuInput(code)
+  })
   if (screen !== 'hud' || !active) {
     previousFrame = now
     lastRender = 0
@@ -816,14 +833,16 @@ function frame(now) {
     p = sim.player,
     oldX = p.x,
     oldZ = p.z,
-    dx = lookX,
-    dy = lookY
+    dx = lookX + pad.lookX * dt * 760,
+    dy = lookY + pad.lookY * dt * 525,
+    beforeSpeed = Math.abs(sim.vehicle?.speed || 0)
+  const inputKeys = pad.held.size ? new Set([...keys, ...pad.held]) : keys
   lookX = lookY = 0
   frameAverage = frameAverage * 0.95 + actual * 0.05
   fps = 1 / Math.max(0.001, frameAverage)
   const c = climate.update(dt, p, camera, settings, world)
   sim.update(dt, {
-    keys: survival.controls(keys),
+    keys: survival.controls(inputKeys),
     lookX: dx,
     lookY: dy,
     settings,
@@ -864,7 +883,9 @@ function frame(now) {
     changed()
     info('Waypoint reached')
   }
-  if (lastCollisions !== sim.collisions) {
+  const impact = lastCollisions !== sim.collisions
+  gamepad.drive(now, screen === 'hud' && sim.vehicle, beforeSpeed, dt, impact, settings.vibration)
+  if (impact) {
     lastCollisions = sim.collisions
     audio.play('hit')
   }

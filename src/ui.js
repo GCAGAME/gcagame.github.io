@@ -68,6 +68,7 @@ const defaultSettings = {
   timeScale: 6,
   weather: 'Auto',
   volume: 0.65,
+  vibration: true,
 }
 const choice = (key, label, values) => ({ key, label, values })
 const range = (key, label, min, max, step, unit = '') => ({ key, label, min, max, step, unit })
@@ -111,9 +112,25 @@ const groups = {
       'Snow',
     ]),
   ],
-  Audio: [range('volume', 'Master volume', 0, 1, 0.05, '%')],
+  Audio: [
+    range('volume', 'Master volume', 0, 1, 0.05, '%'),
+    toggle('vibration', 'Controller vibration'),
+  ],
 }
 const controls = {
+  Controller: [
+    ['Left stick / right stick', 'Move or steer / look'],
+    ['R2 / L2', 'Accelerate / brake or reverse'],
+    ['Cross / A', 'Jump, vault or handbrake'],
+    ['Square / X', 'Interact or enter / exit vehicle'],
+    ['Circle / B', 'Flashlight'],
+    ['Triangle / Y', 'Change camera'],
+    ['L1 / R1', 'Sprint / horn'],
+    ['D-pad ↑ / →', 'Objectives / inventory'],
+    ['D-pad ↓ / ←', 'Recover vehicle / headlights'],
+    ['Share / Options', 'Map / pause'],
+    ['D-pad ↑ ↓ / Cross / Circle', 'Menu navigation / select / back'],
+  ],
   'On foot': [
     ['W A S D', 'Move'],
     ['Mouse / arrows', 'Look around'],
@@ -727,7 +744,10 @@ export function createUI(actions = {}) {
           '</div>'
         break
       case 'settings':
-        html = settingsPanel() + (origin === 'menu'
+        html = settingsPanel() + (activeTab === 'Audio'
+          ? rowButton('data-action="controllerSpeaker"', call('speakerEnabled')
+            ? 'Turn off controller car audio' : 'Play car audio on controller speaker')
+          : '') + (origin === 'menu'
           ? rowButton('data-action="exportJourney"', 'Export Saved Journey') +
             rowButton('data-action="importJourney"', 'Import Saved Journey')
           : '')
@@ -742,6 +762,7 @@ export function createUI(actions = {}) {
           '</div><div>' +
           controlGroup('Driving') +
           controlGroup('Navigation') +
+          controlGroup('Controller') +
           '</div></div>'
         break
       case 'credits':
@@ -882,6 +903,14 @@ export function createUI(actions = {}) {
       if (job) job.catch(() => toast('Fullscreen is unavailable in this browser window.'))
       return
     }
+    if (d.action === 'controllerSpeaker') {
+      if (btn.disabled) return
+      btn.disabled = true
+      Promise.resolve(call('controllerSpeaker')).finally(() => {
+        if (view === 'settings') renderPanel()
+      })
+      return
+    }
     if (d.action) call(d.action)
   })
   on(root, 'input', (event) => {
@@ -965,6 +994,20 @@ export function createUI(actions = {}) {
     if (view === 'menu') cartography.draw($('overview-map'), data, 'overview')
   })
   return {
+    menuInput(code) {
+      if (!['Space', 'Tab', 'KeyU', 'KeyW', 'KeyS'].includes(code)) return
+      const panel = view === 'menu' ? root.querySelector('.menu-nav') : body
+      const items = [...panel.querySelectorAll('button:enabled, input:enabled, select:enabled')]
+        .filter(el => el.getClientRects().length)
+      if (!items.length) return
+      const i = items.indexOf(document.activeElement)
+      if (code === 'Space') (items[i] || items[0]).click()
+      else {
+        const down = code === 'KeyU' || code === 'KeyS'
+        const next = i === -1 ? (down ? 0 : items.length - 1) : (i + (down ? 1 : -1) + items.length) % items.length
+        items[next].focus()
+      }
+    },
     loading,
     menu,
     hud,
