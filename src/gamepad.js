@@ -8,6 +8,21 @@ function stick(value = 0) {
   return Math.sign(value) * Math.max(0, (Math.abs(value) - 0.18) / 0.82)
 }
 
+// Full-scale tuning points are 1.2 horizontal g and 4,500 N·m total wheel torque.
+export function drivingRumble({ longitudinalG, lateralG, wheelTorqueNm }) {
+  const load = Math.min(1, Math.hypot(longitudinalG, lateralG) / 1.2)
+  const torque = Math.min(1, Math.abs(wheelTorqueNm) / 4500)
+  const effort = Math.max(load, torque)
+  const period = Math.round(170 - 90 * effort)
+  return {
+    strongMagnitude: 0.018 + 0.57 * load + 0.10 * torque,
+    weakMagnitude: 0.025 + 0.10 * load + 0.48 * torque,
+    period,
+    // Overlap at idle for a steady hum; leave a short gap between pulses under load.
+    duration: Math.round(period + 10 - 30 * effort),
+  }
+}
+
 export function createGamepad() {
   let index = -1, previous = new Set(), motor = null, nextPulse = 0, vibrating = false
   let denied = false, inMenu = false, repeatAt = Infinity
@@ -86,12 +101,11 @@ export function createGamepad() {
     return state
   }
 
-  function drive(now, car, beforeSpeed, dt, impact, enabled) {
+  function drive(now, car, impactG, enabled) {
     if (!enabled || !car || !motor?.playEffect) return quiet()
-    const speed = Math.abs(car.speed)
     let duration, strongMagnitude, weakMagnitude
-    if (impact > 0) {
-      impactStrength = Math.min(1, impact / 16)
+    if (impactG > 0) {
+      impactStrength = Math.min(1, impactG / 18)
       impactAt = now
       aftershockPlayed = false
       duration = 85 + 55 * impactStrength
@@ -104,18 +118,15 @@ export function createGamepad() {
       strongMagnitude = 0.14 + 0.56 * impactStrength
       weakMagnitude = 0.08 + 0.23 * impactStrength
     } else {
-      // Ignore physics creep, including speeds that round to zero on the dashboard.
-      if (speed < 0.23) return quiet()
       if (now < nextPulse) return
-      const revs = Math.min(1, speed / (15 * Math.max(1, Number(car.gear) || 1)))
-      const acceleration = Math.min(1, Math.max(0, speed - beforeSpeed) / (dt * 6))
-      duration = 145
-      strongMagnitude = 0.04 + acceleration * 0.34
-      weakMagnitude = 0.06 + revs * 0.32
+      const rumble = drivingRumble(car)
+      duration = rumble.duration
+      strongMagnitude = rumble.strongMagnitude
+      weakMagnitude = rumble.weakMagnitude
+      nextPulse = now + rumble.period
     }
     const actuator = motor
     vibrating = true
-    nextPulse = now + 110
     actuator.playEffect('dual-rumble', { duration, strongMagnitude, weakMagnitude })
       .catch(() => {
         if (motor === actuator) {

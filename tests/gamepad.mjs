@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { createGamepad } from '../src/gamepad.js'
+import { createGamepad, drivingRumble } from '../src/gamepad.js'
 
 const effects = []
 const pad = {
@@ -34,21 +34,36 @@ pad.buttons[12].pressed = true
 poll(true)
 assert.deepEqual(presses, ['Up'])
 
-const drive = (time, speed, impact = 0) => gamepad.drive(time, { speed, gear: 1 }, speed, 1/60, impact, true)
-drive(0, 0)
-drive(300, -0.10)
-assert.deepEqual(effects, [])
-drive(500, 4)
-drive(510, 0)
-assert.equal(effects.at(-1), 'reset')
-drive(600, 0, 21)
+const coast = { longitudinalG: 0, lateralG: 0, wheelTorqueNm: 0 }
+const idle = drivingRumble(coast)
+assert(idle.strongMagnitude > 0 && idle.strongMagnitude < 0.04)
+assert(idle.weakMagnitude > 0 && idle.weakMagnitude < 0.04)
+assert.deepEqual(drivingRumble({ ...coast, speed: 30, gear: 4 }), idle)
+const braking = drivingRumble({ ...coast, longitudinalG: -0.75 })
+const corner = drivingRumble({ ...coast, lateralG: 0.75 })
+const torque = drivingRumble({ ...coast, wheelTorqueNm: 2800 })
+assert.deepEqual(corner, braking)
+assert(braking.strongMagnitude > torque.strongMagnitude)
+assert(torque.weakMagnitude > braking.weakMagnitude)
+assert(braking.period < idle.period && torque.period < idle.period)
+assert.deepEqual(drivingRumble({ ...coast, wheelTorqueNm: -2800 }), torque)
+const limit = drivingRumble({ longitudinalG: 100, lateralG: 100, wheelTorqueNm: 20000 })
+assert(limit.strongMagnitude <= 1 && limit.weakMagnitude <= 1 && limit.duration > 0)
+
+const drive = (time, impactG = 0, enabled = true) => gamepad.drive(time, coast, impactG, enabled)
+drive(0)
+assert.equal(effects.at(-1).weakMagnitude, idle.weakMagnitude)
+drive(10)
+assert.equal(effects.length, 1)
+drive(170)
+assert.equal(effects.length, 2)
+drive(200, 21)
 assert.equal(effects.at(-1).strongMagnitude, 1)
 assert.equal(effects.at(-1).weakMagnitude, 1)
-drive(743, 0)
-assert(effects.at(-1).strongMagnitude > 0 && effects.at(-1).strongMagnitude < 1)
-drive(962, 0)
+drive(343)
+assert(effects.at(-1).strongMagnitude > idle.strongMagnitude && effects.at(-1).strongMagnitude < 1)
+drive(561)
+assert.equal(effects.at(-1).strongMagnitude, idle.strongMagnitude)
+drive(600, 0, false)
 assert.equal(effects.at(-1), 'reset')
-effects.length = 0
-drive(1200, 0)
-assert.deepEqual(effects, [])
-console.log('Passed controller layout, menu directions and repeat, stopped rumble, and impact decay.')
+console.log('Passed controller layout, navigation, idle rumble, G-force, wheel torque, pulse timing, and impact decay.')

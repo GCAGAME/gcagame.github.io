@@ -4,6 +4,7 @@ import * as THREE from 'three'
 import { makeCar, vehicleSpecs } from './sim-models.js'
 import { makePerson, posePerson, setPersonDetail, setPersonAppearance } from './people.js'
 
+const STANDARD_GRAVITY = 9.80665
 const clamp = THREE.MathUtils.clamp
 const lerp = THREE.MathUtils.lerp
 const damp = (a, b, rate, dt) => lerp(a, b, 1 - Math.exp(-rate * dt))
@@ -164,6 +165,7 @@ export function createSimulation(scene, camera, world) {
     transfer = null,
     collisionCooldown = 0,
     impactSpeed = 0,
+    impactG = 0,
     violation = 0,
     lastSignal = '',
     doorIdle = 0,
@@ -233,6 +235,7 @@ export function createSimulation(scene, camera, world) {
       yaw,
       speed: 0,
       gear: 'N',
+      longitudinalG: 0, lateralG: 0, wheelTorqueNm: 0,
       fuel: 100,
       condition: 100,
       headlights: false,
@@ -720,19 +723,23 @@ export function createSimulation(scene, camera, world) {
             ? 1
             : 0.77
           : 1)
+    const oldHeading = c.travelYaw
     const before = c.speed,
       abs = Math.abs(before),
       upgraded = c.upgraded ? 1.2 : 1
     const power = s.power * upgraded * (c.fuel > 0 ? 0.5 + 0.005 * c.condition : 0)
     c.braking = hand || (back && before > 0) || (throttle && before < -0.4)
-    if (throttle && !back)
-      c.speed +=
-        dt *
-        (before < -0.4
-          ? s.brake
-          : power * Math.max(0.09, 1 - abs / (s.max * upgraded)) * (loose ? 0.8 : 1))
-    if (back && !throttle)
-      c.speed -= dt * (before > 0.4 ? s.brake * grip : power * 0.46 * Math.max(0, 1 - abs / 7))
+    let driveAcceleration = 0
+    if (throttle && !back) {
+      if (before < -0.4) c.speed += dt * s.brake
+      else driveAcceleration = power * Math.max(0.09, 1 - abs / (s.max * upgraded)) * (loose ? 0.8 : 1)
+    } else if (back && !throttle) {
+      if (before > 0.4) c.speed -= dt * s.brake * grip
+      else driveAcceleration = -power * 0.46 * Math.max(0, 1 - abs / 7)
+    }
+    c.speed += dt * driveAcceleration
+    // Total driven-wheel torque (N·m) from tractive force before drag and braking.
+    c.wheelTorqueNm = s.mass * driveAcceleration * s.wheel
     const friction =
       (0.3 + abs * 0.009 + abs * abs * 0.00043) * (1500 / s.mass) + (loose ? 0.85 : 0)
     if (abs > 0.25 && !hand) c.speed -= Math.sin(c.tilt) * 2.6 * dt
@@ -774,18 +781,21 @@ export function createSimulation(scene, camera, world) {
       c.x += (nx - c.x) * safe
       c.z += (nz - c.z) * safe
       c.yaw = angle(c.yaw + yawStep * safe)
+      const reboundSpeed = abs > 0.7 ? -Math.sign(c.speed) * Math.min(1.4, abs * 0.12) : 0
       if (collisionCooldown <= 0) {
         if (abs > 2.4) {
           const damage = Math.max(0, (abs - 2) * 0.7)
           c.condition = Math.max(12, c.condition - damage)
           player.health = Math.max(15, player.health - damage * 0.36)
           impactSpeed = abs
+          // Average collision deceleration over a modeled 100 ms contact interval.
+          impactG = Math.abs(c.speed - reboundSpeed) / (0.1 * STANDARD_GRAVITY)
           c.bounce = 0.025 + 0.13 * Math.min(1, abs / 16)
           collisions++
         }
         collisionCooldown = 0.25
       }
-      c.speed = abs > 0.7 ? -Math.sign(c.speed) * Math.min(1.4, abs * 0.12) : 0
+      c.speed = reboundSpeed
       c.travelYaw = c.yaw
     } else {
       c.x = nx
@@ -793,6 +803,10 @@ export function createSimulation(scene, camera, world) {
       c.yaw = nextYaw
       c.clearPose = { x: nx, z: nz, yaw: nextYaw }
     }
+    // Resolve the fixed-step change in velocity along and across the prior direction of travel.
+    const turnAngle = c.travelYaw - oldHeading
+    c.longitudinalG = (c.speed * Math.cos(turnAngle) - before) / (dt * STANDARD_GRAVITY)
+    c.lateralG = c.speed * Math.sin(turnAngle) / (dt * STANDARD_GRAVITY)
     c.gear =
       Math.abs(c.speed) < 0.18
         ? 'N'
@@ -1443,6 +1457,7 @@ export function createSimulation(scene, camera, world) {
         clearPose: { x, z, yaw },
         speed: 0,
         prevSpeed: 0,
+        longitudinalG: 0, lateralG: 0, wheelTorqueNm: 0,
         fuel: 100,
         condition: 100,
         upgraded: false,
@@ -1669,6 +1684,9 @@ export function createSimulation(scene, camera, world) {
     },
     get trafficViolation() {
       return violation
+    },
+    get impactG() {
+      return impactG
     },
     get impactSpeed() {
       return impactSpeed
