@@ -134,7 +134,7 @@ for (const [x, z] of [[-7.048, 61.738], [-6.421, 63.068], [-9.422, 62.858], [-8.
   assert(Math.abs(world.height(x, z) - .142) < 1e-7)
 for (const [z, expected] of [[61.38, .142], [60.84, .097], [60.30, .052], [59.9, .052]])
   assert(Math.abs(world.height(-8, z) - expected) < 1e-7)
-assert.equal(world.height(-6, 69), 0)
+assert.equal(world.height(-6, 69), .11) // The sidewalk beside the driveway.
 assert.equal(world.height(-15, 72), 0)
 for (const c of sim.cars) {
   const hinge = c.model.detail.getObjectByName('Driver door hinge')
