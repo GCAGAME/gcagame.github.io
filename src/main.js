@@ -834,8 +834,7 @@ function frame(now) {
     oldX = p.x,
     oldZ = p.z,
     dx = lookX + pad.lookX * dt * 760,
-    dy = lookY + pad.lookY * dt * 525,
-    beforeSpeed = Math.abs(sim.vehicle?.speed || 0)
+    dy = lookY + pad.lookY * dt * 525
   const inputKeys = pad.held.size ? new Set([...keys, ...pad.held]) : keys
   lookX = lookY = 0
   frameAverage = frameAverage * 0.95 + actual * 0.05
@@ -883,11 +882,11 @@ function frame(now) {
     changed()
     info('Waypoint reached')
   }
-  const impact = lastCollisions !== sim.collisions ? sim.impactSpeed : 0
-  gamepad.drive(now, screen === 'hud' && sim.vehicle, beforeSpeed, dt, impact, settings.vibration)
+  const impact = lastCollisions !== sim.collisions
+  gamepad.drive(now, screen === 'hud' && sim.vehicle, impact ? sim.impactG : 0, settings.vibration)
   if (impact) {
     lastCollisions = sim.collisions
-    audio.play('hit', Math.min(1, impact / 16))
+    audio.play('hit', Math.min(1, sim.impactSpeed / 16))
   }
   audio.update(dt, sim, world, c, Math.hypot(p.x - oldX, p.z - oldZ), camera)
   graphics.render(
