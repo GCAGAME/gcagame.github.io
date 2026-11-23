@@ -122,7 +122,7 @@ export function createWorld(scene) {
       (3 + 3 * Math.sin(x * 0.021 + z * 0.017) + 1.6 * Math.sin(z * 0.032))
     return mountain + rim * (23 + 78 * peak + 17 * n) + rolling
   }
-  function rawHeight(x, z) {
+  function naturalHeight(x, z) {
     const cx = 139 + Math.sin((z + 115) * 0.013) * 11
     const basin = Math.hypot((x - cx) / 48, (z + 119) / 151)
     const distance = clearance(x, z)
@@ -156,6 +156,29 @@ export function createWorld(scene) {
     g -= (1 - smooth(0.73, 1.07, basin)) * 10.5
     return g
   }
+  // The east road crosses the inlet and climbs to the trail. Sample its grade
+  // at the same six-metre stations used by the asphalt and the terrain mesh.
+  const crossingZ = -180,
+    west = 72,
+    east = 246
+  const deckEdge = 6.5
+  const rise = naturalHeight(east, crossingZ)
+  function crossingGrade(x) {
+    const station = Math.floor((x - west) / 6)
+    const t = (x - west) / 6 - station
+    const n = (east - west) / 6
+    return (rise * ((1 - t) * station ** 2 + t * (station + 1) ** 2)) / (n * n)
+  }
+  function rawHeight(x, z) {
+    const ground = naturalHeight(x, z)
+    if (x < west || x >= east + 18 || Math.abs(z - crossingZ) >= 24) return ground
+    // Preserve the submerged channel between abutments. Shape the two banks
+    // and blend the far approach back into the hillside beyond the pavement.
+    const bank = 1 - smooth(78, 90, x) + smooth(168, 180, x)
+    const influence =
+      bank * (1 - smooth(12, 24, Math.abs(z - crossingZ))) * (1 - smooth(east, east + 18, x))
+    return ground + (crossingGrade(x) - ground) * influence
+  }
   // Use the same piecewise planes that make up the terrain mesh, keeping
   // tires and the player's feet on the rendered surface even on steep slopes.
   const step = 6
@@ -169,20 +192,60 @@ export function createWorld(scene) {
     if (u >= v) return h00 * (1 - u) + rawHeight(ax + step, az) * (u - v) + h11 * v
     return h00 * (1 - v) + rawHeight(ax, az + step) * (v - u) + h11 * u
   }
-  const bridge = (x, z) => x > 88 && x < 202 && Math.abs(z + 180) < 5.6
+  const bridge = (x, z) => x >= west && x <= east && Math.abs(z - crossingZ) <= deckEdge
   function inRect(x, z, v) {
     return Math.abs(x - v.x) <= v.w / 2 && Math.abs(z - v.z) <= v.d / 2
   }
   function indoors(x, z) {
     return interiors.some((v) => inRect(x, z, v))
   }
+  // Index walkable top faces using the same triangle fan emitted by art.poly.
+  // The collision surface then follows curved curbs and cut-and-fill grades exactly.
+  const pavement = new Map()
+  function recordPavement(vertices) {
+    const [a] = vertices
+    for (let i = 1; i + 1 < vertices.length; i++) {
+      const b = vertices[i],
+        c = vertices[i + 1]
+      const bx = b[0] - a[0],
+        bz = b[2] - a[2],
+        cx = c[0] - a[0],
+        cz = c[2] - a[2]
+      const det = bx * cz - bz * cx
+      if (Math.abs(det) < 1e-9) continue
+      const tri = { a, bx, bz, cx, cz, det, by: b[1] - a[1], cy: c[1] - a[1] }
+      const xs = [a[0], b[0], c[0]],
+        zs = [a[2], b[2], c[2]]
+      for (let ix = Math.floor(Math.min(...xs) / 8); ix <= Math.floor(Math.max(...xs) / 8); ix++) {
+        for (
+          let iz = Math.floor(Math.min(...zs) / 8);
+          iz <= Math.floor(Math.max(...zs) / 8);
+          iz++
+        ) {
+          const key = ix + ',' + iz
+          if (!pavement.has(key)) pavement.set(key, [])
+          pavement.get(key).push(tri)
+        }
+      }
+    }
+  }
   function height(x, z) {
-    const y = terrainHeight(x, z)
+    let y = terrainHeight(x, z)
+    const nearby = pavement.get(Math.floor(x / 8) + ',' + Math.floor(z / 8))
+    if (nearby)
+      for (const t of nearby) {
+        const dx = x - t.a[0],
+          dz = z - t.a[2]
+        const u = (dx * t.cz - dz * t.cx) / t.det,
+          v = (t.bx * dz - t.bz * dx) / t.det
+        if (u >= -1e-8 && v >= -1e-8 && u + v <= 1 + 1e-8)
+          y = Math.max(y, t.a[1] + u * t.by + v * t.cy)
+      }
     for (const floor of floors) {
       if (inRect(x, z, floor) && (!floor.polygon || circleHits(x, z, 0, floor.polygon)))
         return Math.max(y, floor.level(x, z))
     }
-    return bridge(x, z) ? Math.max(0.08, y) : y
+    return y
   }
   function waterAt(x, z) {
     return (
@@ -207,10 +270,10 @@ export function createWorld(scene) {
       segments.push({ a, b, dx, dz, len, sx: dz / len, sz: -dx / len, width, kind })
     }
   }
-  const eastWest = [-110, -64, 0, 64, 105]
+  const eastWest = [-110, -64, 0, 64]
   for (const z of [60, 0, -80, -130, -180])
     road(
-      (z === -180 ? [...eastWest, 157, 205, 246] : eastWest).map((x) => [x, z]),
+      [...eastWest, ...(z === crossingZ ? [west, east] : [z === -130 ? 84 : z === -80 ? 90 : 105])].map(x => [x, z]),
       z === -80 ? 11 : 9,
     )
   for (const x of [-64, 0, 64]) {
@@ -607,7 +670,7 @@ export function createWorld(scene) {
           ix < 4 &&
           iz >= -4 &&
           iz < 3 &&
-          tileDistance < detailRange + (old?.userData.detailed ? 32 : 0)
+          ((iz === -1 && (ix === 0 || ix === 1)) || tileDistance < detailRange + (old?.userData.detailed ? 32 : 0))
         if (old && old.userData.detailed !== detailed) {
           scene.remove(old)
           old.geometry.dispose()
@@ -624,7 +687,7 @@ export function createWorld(scene) {
   function at(s, t, lift, offset) {
     const x = s.a.x + s.dx * t + s.sx * offset,
       z = s.a.z + s.dz * t + s.sz * offset
-    return [x, height(x, z) + lift, z]
+    return [x, (bridge(x, z) ? crossingGrade(x) : terrainHeight(x, z)) + lift, z]
   }
   function strip(s, t0, t1, o0, o1, lift, mat, tint) {
     const scale = m[mat].userData.scale
@@ -632,8 +695,15 @@ export function createWorld(scene) {
       u1 = o1 / (scale[0] || 1),
       v0 = (t0 * s.len) / (scale[1] || 1),
       v1 = (t1 * s.len) / (scale[1] || 1)
+    const points = [
+      at(s, t0, lift, o0),
+      at(s, t1, lift, o0),
+      at(s, t1, lift, o1),
+      at(s, t0, lift, o1),
+    ]
+    if (mat === 'asphalt' || mat === 'concrete') recordPavement(points)
     poly(
-      [at(s, t0, lift, o0), at(s, t1, lift, o0), at(s, t1, lift, o1), at(s, t0, lift, o1)],
+      points,
       mat,
       tint,
       [
@@ -644,17 +714,26 @@ export function createWorld(scene) {
       ],
     )
   }
+  const cornerRadius = 3.4,
+    walkWidth = 2
+  const streetRows = [60, 0, -80, -130, -180],
+    streetColumns = [-64, 0, 64]
+  function crossingWidth(s, p) {
+    if (!streetRows.includes(p.z) || !streetColumns.includes(p.x)) return 0
+    return s.dx === 0 ? (p.z === -80 ? 5.5 : 4.5) : p.x === 0 ? 5.5 : 4.5
+  }
   for (const s of segments) {
-    const paved = s.kind === 'road',
-      urban = s.a.z >= -181 && s.b.z >= -181 && Math.max(Math.abs(s.a.x), Math.abs(s.b.x)) < 111
+    const paved = s.kind === 'road'
+    const crossing = paved && s.a.x === west && s.a.z === crossingZ && s.b.x === east
+    const urban = Math.max(s.a.z, s.b.z) >= -180 && Math.max(Math.abs(s.a.x), Math.abs(s.b.x)) < 111
     const lanes = s.width / 2,
-      steps = Math.ceil(s.len / 4)
-    // Horizontal ribbons own the square at each city intersection. The other
-    // approaches end at the edge, avoiding two nearly coplanar asphalt layers.
-    const junctionWidth = (p) =>
-      paved && s.dx === 0 && [60, 0, -80, -130, -180].includes(p.z) ? (p.z === -80 ? 5.5 : 4.5) : 0
-    const startCut = junctionWidth(s.a) / s.len,
-      endCut = 1 - junctionWidth(s.b) / s.len
+      steps = crossing ? s.len / 3 : Math.ceil(s.len / 4)
+    const startWidth = crossingWidth(s, s.a),
+      endWidth = crossingWidth(s, s.b)
+    const startCut = paved && s.dx === 0 ? startWidth / s.len : 0
+    const endCut = 1 - (paved && s.dx === 0 ? endWidth / s.len : 0)
+    const walkStart = startWidth ? (startWidth + cornerRadius) / s.len : 0
+    const walkEnd = endWidth ? 1 - (endWidth + cornerRadius) / s.len : 1
     for (let i = 0; i < steps; i++) {
       const t0 = i / steps,
         t1 = (i + 1) / steps
@@ -662,19 +741,21 @@ export function createWorld(scene) {
       const rt0 = Math.max(t0, startCut),
         rt1 = Math.min(t1, endCut)
       if (paved && rt1 > rt0) strip(s, rt0, rt1, -lanes, lanes, lift, 'asphalt', 0xb2b6b5)
-      if (paved && urban) {
+      if (paved && (urban || crossing)) {
         for (const side of [-1, 1]) {
           const off = side * lanes,
             edge = side * (lanes + 2)
           const midX = s.a.x + (s.dx * (t0 + t1)) / 2
           const curbCut = s.a.z === 60 && s.dz === 0 && side === -1 && midX > -23 && midX < -5
-          if (!curbCut && t0 * s.len > 5 && t1 * s.len < s.len - 5) {
-            strip(s, t0, t1, Math.min(off, edge), Math.max(off, edge), 0.105, 'concrete', 0xc6c7c2)
+          const from = Math.max(t0, walkStart),
+            to = Math.min(t1, walkEnd)
+          if (!curbCut && to > from) {
+            strip(s, from, to, Math.min(off, edge), Math.max(off, edge), 0.11, 'concrete', 0xc6c7c2)
             // Expansion cuts follow the dimensions of the poured sidewalk slabs.
             strip(
               s,
-              t0,
-              Math.min(t1, t0 + 0.021 / s.len),
+              from,
+              Math.min(to, from + 0.021 / s.len),
               Math.min(off, edge),
               Math.max(off, edge),
               0.112,
@@ -683,8 +764,8 @@ export function createWorld(scene) {
             )
             strip(
               s,
-              t0,
-              t1,
+              from,
+              to,
               Math.min(off, off + side * 0.17),
               Math.max(off, off + side * 0.17),
               0.115,
@@ -692,21 +773,21 @@ export function createWorld(scene) {
               0xbcbbae,
             )
             const edgeQuad = [
-              at(s, t0, 0.112, off),
-              at(s, t1, 0.112, off),
-              at(s, t1, 0.04, off),
-              at(s, t0, 0.04, off),
+              at(s, from, 0.112, off),
+              at(s, to, 0.112, off),
+              at(s, to, 0.04, off),
+              at(s, from, 0.04, off),
             ]
             poly(side < 0 ? edgeQuad : edgeQuad.reverse(), 'concrete', 0xb2b0a5)
           }
         }
       }
-      if (paved && s.width >= 9 && t0 * s.len >= 6 && t1 * s.len <= s.len - 6) {
+      const markStart = Math.max(t0, startWidth ? (startWidth + 2.9) / s.len : 0)
+      const markEnd = Math.min(t1, endWidth ? 1 - (endWidth + 2.9) / s.len : 1)
+      if (paved && markEnd > markStart) {
         for (const off of [-0.152, 0.152])
-          strip(s, t0, t1, off - 0.064, off + 0.064, 0.069, 'marking', 0xc2a56b)
+          strip(s, markStart, markEnd, off - 0.064, off + 0.064, 0.069, 'marking', 0xc2a56b)
       }
-      if (paved && !urban && i % 2 === 0 && t0 * s.len > 4)
-        strip(s, t0, t1, -0.075, 0.075, 0.075, 'solid', 0xd6bea0)
     }
     // A joined gravel apron covers the outside of each mountain switchback.
     if (!paved) {
@@ -722,14 +803,100 @@ export function createWorld(scene) {
       }
     }
   }
-  // The boardwalk rail stays clear of the roadway on both sides.
-  for (const side of [-1, 1])
-    for (let x = 94; x < 187; x += 4) {
-      const z = -180 + side * 5.05
-      box(x, 0.06, z, 0.23, 1, 0.22, 'metal', 0x626961)
-      box(x + 2, 0.93, z, 4.15, 0.14, 0.17, 'metal', 0xadb0a2)
-      rectangle(x + 2, z, 4, 0.2, -0.1, 1.3)
+  // Tangential quarter-circles share endpoints with both straight walks.
+  function topFace(points, material, tint) {
+    const [a, b, c] = points
+    if ((b[2] - a[2]) * (c[0] - a[0]) < (b[0] - a[0]) * (c[2] - a[2])) points.reverse()
+    recordPavement(points)
+    const scale = m[material].userData.scale
+    poly(
+      points,
+      material,
+      tint,
+      points.map(([x, , z]) => [x / scale[0], z / scale[1]]),
+    )
+  }
+  for (const x of streetColumns)
+    for (const z of streetRows) {
+      const hx = x === 0 ? 5.5 : 4.5,
+        hz = z === -80 ? 5.5 : 4.5
+      for (const sx of [-1, 1])
+        for (const sz of [-1, 1]) {
+          const cx = x + sx * (hx + cornerRadius),
+            cz = z + sz * (hz + cornerRadius)
+          function vertex(angle, radius, lift) {
+            const xx = cx - sx * radius * Math.cos(angle),
+              zz = cz - sz * radius * Math.sin(angle)
+            return [xx, terrainHeight(xx, zz) + lift, zz]
+          }
+          const ax = x + sx * hx,
+            az = z + sz * hz
+          const anchor = [ax, terrainHeight(ax, az) + 0.052, az]
+          for (let i = 0; i < 10; i++) {
+            const a = (i * Math.PI) / 20,
+              b = ((i + 1) * Math.PI) / 20
+            const band = (outer, inner, h) => [
+              vertex(a, outer, h),
+              vertex(b, outer, h),
+              vertex(b, inner, h),
+              vertex(a, inner, h),
+            ]
+            topFace(
+              [anchor, vertex(a, cornerRadius, 0.052), vertex(b, cornerRadius, 0.052)],
+              'asphalt',
+              0xb2b6b5,
+            )
+            topFace(band(cornerRadius, cornerRadius - walkWidth, 0.11), 'concrete', 0xc6c7c2)
+            topFace(band(cornerRadius, cornerRadius - 0.17, 0.115), 'concrete', 0xbcbbae)
+            const face = [
+              vertex(a, cornerRadius, 0.115),
+              vertex(b, cornerRadius, 0.115),
+              vertex(b, cornerRadius, 0.04),
+              vertex(a, cornerRadius, 0.04),
+            ]
+            poly(sx * sz < 0 ? face.reverse() : face, 'concrete', 0xb2b0a5)
+          }
+        }
     }
+  // Fascia, piers and guardrails follow the same deck stations as the asphalt.
+  for (let x = 78; x < 180; x += 3) {
+    const y = crossingGrade(x),
+      next = crossingGrade(x + 3)
+    for (const side of [-1, 1]) {
+      const z = crossingZ + side * deckEdge
+      const face = [
+        [x, y + 0.11, z],
+        [x + 3, next + 0.11, z],
+        [x + 3, next - 0.55, z],
+        [x, y - 0.55, z],
+      ]
+      poly(side > 0 ? face.reverse() : face, 'concrete', 0xa7a7a1)
+      const railZ = z - side * 0.14
+      if ((x - 78) % 6 === 0) box(x, y + 0.11, railZ, 0.12, 0.98, 0.13, 'metal', 0x647071)
+      if (x === 177) box(x + 3, next + 0.11, railZ, 0.12, 0.98, 0.13, 'metal', 0x647071)
+      for (const h of [0.57, 1.06])
+        rod([x, y + h, railZ], [x + 3, next + h, railZ], 0.06, 0.06, 'metal', 0xb9c3be, 8)
+      rectangle(x + 1.5, railZ, 3, 0.14, y + 0.08, next + 1.13)
+    }
+    if ((x - 78) % 18 === 0 && x > 78) {
+      for (const offset of [-3.5, 3.5]) {
+        const z = crossingZ + offset,
+          base = terrainHeight(x, z) - 0.25
+        box(x, base, z, 0.9, Math.max(0.1, y - 0.4 - base), 1.15, 'concrete', 0x979990)
+      }
+      box(x, y - 0.6, crossingZ, 1.3, 0.5, 2 * deckEdge, 'concrete', 0xa0a198)
+    }
+    poly(
+      [
+        [x, y - 0.54, crossingZ - deckEdge],
+        [x + 3, next - 0.54, crossingZ - deckEdge],
+        [x + 3, next - 0.54, crossingZ + deckEdge],
+        [x, y - 0.54, crossingZ + deckEdge],
+      ],
+      'concrete',
+      0x888c85,
+    )
+  }
   const context = {
     doorOccupied: (...args) => doorOccupancyTest(...args),
     ...art,
