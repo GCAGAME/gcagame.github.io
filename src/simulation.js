@@ -846,7 +846,7 @@ export function createSimulation(scene, camera, world) {
     }
     cruiseYaw = angle(cruiseYaw + angle(c.yaw - cruiseYaw) * (1 - Math.exp(-8.2 * dt)))
     if (driverView && !transfer) {
-      const p = c.model.cabin
+      const p = c.model.eye
       camera.position
         .set(p.x, p.y, p.z)
         .applyQuaternion(c.model.group.quaternion)
@@ -928,6 +928,7 @@ export function createSimulation(scene, camera, world) {
     c.model.group.visible = c.active && distanceTo < (quality === 'low' ? 182 : 325)
     c.model.detail.visible = c === current || distanceTo < limit
     c.model.coarse.visible = !c.model.detail.visible
+    c.model.showCockpit(c === current && driverView && !transfer, c)
     const shadows =
       c === current ? (quality === 'low' ? 1 : 5) : distanceTo < 9 ? 5 : distanceTo < 18 ? 1 : 0
     setCasterCount(c.model, c.model.detail.visible ? shadows : 0)

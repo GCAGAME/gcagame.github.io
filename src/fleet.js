@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { cabinEnds, createCockpit, driverEye } from './cockpit.js'
 import { fleetMeshes } from './fleet-meshes.js'
 
 // The original GLBs have separate wheel and steering pivots. Their geometry is
@@ -246,6 +247,36 @@ export function makeFleetCar(type, spec, color = defaults[type]) {
   const cabin = column
     ? { x: column.x, y: Math.min(spec.roof - 0.18, column.y + 0.29), z: column.z + 0.32 }
     : { x: -spec.width * 0.211, y: spec.roof * (type === 'offroad' ? 0.72 : 0.82), z: -0.07 }
+  let cockpit
+  function showCockpit(enabled, car) {
+    if (enabled && !cockpit) {
+      cockpit = createCockpit(type, spec)
+      group.add(cockpit.group)
+      // Keep the actual bonnet, bumpers and pickup bed visible beyond the cabin shell.
+      const limits = new THREE.Vector2(...cabinEnds(type))
+      for (const source of [body, expedition].filter(Boolean)) {
+        const original = source.material
+        const cropped = original.clone()
+        cropped.side = THREE.DoubleSide
+        cropped.onBeforeCompile = (shader, renderer) => {
+          original.onBeforeCompile(shader, renderer)
+          shader.uniforms.cabinLimits = { value: limits }
+          shader.vertexShader = 'varying float bodyZ;\n' + shader.vertexShader.replace(
+            '#include <begin_vertex>', '#include <begin_vertex>\nbodyZ = position.z;')
+          shader.fragmentShader = 'varying float bodyZ; uniform vec2 cabinLimits;\n' +
+            shader.fragmentShader.replace('#include <clipping_planes_fragment>',
+              '#include <clipping_planes_fragment>\nif(bodyZ > cabinLimits.x && bodyZ < cabinLimits.y) discard;')
+        }
+        cropped.customProgramCacheKey = () => 'outside-cabin/' + original.customProgramCacheKey()
+        cockpit.group.add(new THREE.Mesh(source.geometry, cropped))
+      }
+    }
+    if (cockpit) cockpit.group.visible = enabled
+    if (enabled) {
+      detail.visible = false
+      cockpit.update(car)
+    }
+  }
   function customize({ paint = null, wheels = 'factory' } = {}) {
     state.paintTint.value.set(
       typeof paint === 'string' && /^#[0-9a-f]{6}$/i.test(paint) ? paint : color,
@@ -265,6 +296,9 @@ export function makeFleetCar(type, spec, color = defaults[type]) {
     wheels,
     steering,
     cabin,
+    eye: driverEye(type),
+    showCockpit,
+    get mirror() { return cockpit?.mirror },
     customize,
     setLamps,
     setDoorOpen,

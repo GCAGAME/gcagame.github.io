@@ -8,6 +8,7 @@ import { createClimate } from './climate.js'
 import { createRendering } from './rendering.js'
 import { createCampaign } from './campaign.js'
 import { createInteractions } from './interactions.js'
+import { renderCabinMirror } from './cockpit.js'
 import { createGamepad } from './gamepad.js'
 import { createAudio } from './audio.js'
 import { loadCompressedSurfaces } from './surfaces.js'
@@ -889,6 +890,7 @@ function frame(now) {
     audio.play('hit', Math.min(1, sim.impactSpeed / 16))
   }
   audio.update(dt, sim, world, c, Math.hypot(p.x - oldX, p.z - oldZ), camera)
+  if (sim.vehicle && sim.firstPerson) renderCabinMirror(renderer, scene, camera, sim.vehicle, now)
   graphics.render(
     settings,
     keys.has('MouseRight'),
