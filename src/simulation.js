@@ -163,6 +163,7 @@ export function createSimulation(scene, camera, world) {
     approachDoor = null,
     transfer = null,
     collisionCooldown = 0,
+    impactSpeed = 0,
     violation = 0,
     lastSignal = '',
     doorIdle = 0,
@@ -778,7 +779,8 @@ export function createSimulation(scene, camera, world) {
           const damage = Math.max(0, (abs - 2) * 0.7)
           c.condition = Math.max(12, c.condition - damage)
           player.health = Math.max(15, player.health - damage * 0.36)
-          c.bounce = 0.045
+          impactSpeed = abs
+          c.bounce = 0.025 + 0.13 * Math.min(1, abs / 16)
           collisions++
         }
         collisionCooldown = 0.25
@@ -860,6 +862,7 @@ export function createSimulation(scene, camera, world) {
       temp.z -= Math.cos(heading) * 1.15
       camera.lookAt(temp)
     }
+    if (c.bounce > 0.002) camera.rotateX(-c.bounce * 0.32)
   }
   function positionCar(c, dt, driven = false) {
     const s = c.spec,
@@ -1666,6 +1669,9 @@ export function createSimulation(scene, camera, world) {
     },
     get trafficViolation() {
       return violation
+    },
+    get impactSpeed() {
+      return impactSpeed
     },
     get collisions() {
       return collisions

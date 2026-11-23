@@ -121,15 +121,17 @@ const controls = {
   Controller: [
     ['Left stick / right stick', 'Move or steer / look'],
     ['R2 / L2', 'Accelerate / brake or reverse'],
-    ['Cross / A', 'Jump, vault or handbrake'],
-    ['Square / X', 'Interact or enter / exit vehicle'],
-    ['Circle / B', 'Flashlight'],
+    ['Cross / A', 'Interact or enter / exit vehicle'],
+    ['Square / X', 'Jump, vault or handbrake'],
+    ['Circle / B', 'Pause or go back'],
     ['Triangle / Y', 'Change camera'],
     ['L1 / R1', 'Sprint / horn'],
+    ['L3 / R3', 'Crouch / flashlight'],
     ['D-pad ↑ / →', 'Objectives / inventory'],
     ['D-pad ↓ / ←', 'Recover vehicle / headlights'],
     ['Share / Options', 'Map / pause'],
-    ['D-pad ↑ ↓ / Cross / Circle', 'Menu navigation / select / back'],
+    ['D-pad or left stick', 'Navigate menus; left / right adjusts settings'],
+    ['Cross / Circle', 'Select / back in menus'],
   ],
   'On foot': [
     ['W A S D', 'Move'],
@@ -799,7 +801,16 @@ export function createUI(actions = {}) {
         break
     }
     panelSignature = JSON.stringify([data.money, data[view]])
+    const active = document.activeElement
+    const focusKey = body.contains(active) && active.matches('[data-pad-focus]') &&
+      Object.entries(active.dataset).find(([key]) => key !== 'padFocus')
     body.innerHTML = html
+    if (focusKey) {
+      const [key, value] = focusKey
+      const target = Array.from(body.querySelectorAll('button, select, input'))
+        .find(el => !el.disabled && el.dataset[key] === value && (!active.id || active.id === el.id))
+      if (target) focusWithPad(target)
+    }
     if (view === 'map') {
       body.querySelector('.map-caption').textContent =
         'Click to set a waypoint. Drag to pan and scroll to zoom.'
@@ -993,20 +1004,47 @@ export function createUI(actions = {}) {
     if (view === 'map') drawFullMap()
     if (view === 'menu') cartography.draw($('overview-map'), data, 'overview')
   })
+  function focusWithPad(el) {
+    root.querySelector('[data-pad-focus]')?.removeAttribute('data-pad-focus')
+    el.setAttribute('data-pad-focus', '')
+    el.focus()
+  }
   return {
     menuInput(code) {
-      if (!['Space', 'Tab', 'KeyU', 'KeyW', 'KeyS'].includes(code)) return
+      if (!['Confirm', 'Up', 'Down', 'Left', 'Right'].includes(code)) return
       const panel = view === 'menu' ? root.querySelector('.menu-nav') : body
       const items = [...panel.querySelectorAll('button:enabled, input:enabled, select:enabled')]
         .filter(el => el.getClientRects().length)
-      if (!items.length) return
-      const i = items.indexOf(document.activeElement)
-      if (code === 'Space') (items[i] || items[0]).click()
-      else {
-        const down = code === 'KeyU' || code === 'KeyS'
-        const next = i === -1 ? (down ? 0 : items.length - 1) : (i + (down ? 1 : -1) + items.length) % items.length
-        items[next].focus()
+      if (view === 'menu') items.push(...root.querySelectorAll('#menu-screen .tools button:enabled'))
+      const forward = code === 'Down' || code === 'Right'
+      const step = forward ? 1 : -1
+      if (!items.length) {
+        if (code !== 'Confirm') body.scrollBy(0, step * body.clientHeight * 0.65)
+        return
       }
+      const i = items.indexOf(document.activeElement)
+      const item = items[i]
+      if (code === 'Confirm') {
+        const choice = item || items[0]
+        focusWithPad(choice)
+        if (choice instanceof HTMLButtonElement) choice.click()
+        return
+      }
+      if (item && (code === 'Left' || code === 'Right')) {
+        if (item instanceof HTMLSelectElement) {
+          item.selectedIndex = Math.max(0, Math.min(item.length - 1, item.selectedIndex + step))
+          item.dispatchEvent(new Event('change', { bubbles: true }))
+          return
+        }
+        if (item.type === 'range') {
+          if (forward) item.stepUp()
+          else item.stepDown()
+          item.dispatchEvent(new Event('input', { bubbles: true }))
+          return
+        }
+      }
+      const next = i < 0 ? (forward ? 0 : items.length - 1) : (i + step + items.length) % items.length
+      focusWithPad(items[next])
     },
     loading,
     menu,
