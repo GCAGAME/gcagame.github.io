@@ -130,6 +130,7 @@ button {
 button:disabled {
   cursor: default;
 }
+[data-pad-focus]:focus,
 button:focus-visible,
 select:focus-visible,
 input:focus-visible,

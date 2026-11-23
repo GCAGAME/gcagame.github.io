@@ -214,7 +214,11 @@ export function createAudio() {
       burst(0.16, 400, 0.48)
       tone(92, 40, 0.1, 0.18, 'triangle')
     },
-    hit: () => burst(0.24, 620, 0.54, 'lowpass', 0, carMix),
+    hit: (strength = 0.5) => {
+      burst(0.09 + strength * 0.12, 850 + strength * 2000, 0.22 + strength * 0.52, 'lowpass', 0, carMix)
+      tone(100, 38, 0.13 + strength * 0.18, 0.09 + strength * 0.34, 'triangle', 0, 0, carMix)
+      if (strength > 0.45) burst(0.16, 1450, 0.21 * strength, 'bandpass', 0.085, carMix)
+    },
     thunder: () => {
       burst(2.1, 200, 0.72, 'lowpass', 0.48)
       tone(45, 28, 1.9, 0.2, 'sine', 0.65)
@@ -312,6 +316,6 @@ export function createAudio() {
   return {
     activate, setActive, setVolume, update, toggleControllerSpeaker,
     get speakerEnabled() { return !!speaker },
-    play: (name) => cue[name]?.(),
+    play: (name, strength) => cue[name]?.(strength),
   }
 }

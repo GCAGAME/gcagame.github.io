@@ -815,10 +815,10 @@ function frame(now) {
   const pad = gamepad.poll(ready && !document.hidden && document.hasFocus(), code => {
     if (screen !== previousScreen) return
     if (screen === 'hud') pressAction(code)
-    else if (code === 'Escape' || code === 'KeyF' || (screen === 'map' && code === 'KeyM'))
+    else if (code === 'Escape' || (screen === 'map' && code === 'KeyM'))
       closePanel()
     else ui.menuInput(code)
-  })
+  }, previousScreen !== 'hud', now)
   if (screen !== 'hud' || !active) {
     previousFrame = now
     lastRender = 0
@@ -883,11 +883,11 @@ function frame(now) {
     changed()
     info('Waypoint reached')
   }
-  const impact = lastCollisions !== sim.collisions
+  const impact = lastCollisions !== sim.collisions ? sim.impactSpeed : 0
   gamepad.drive(now, screen === 'hud' && sim.vehicle, beforeSpeed, dt, impact, settings.vibration)
   if (impact) {
     lastCollisions = sim.collisions
-    audio.play('hit')
+    audio.play('hit', Math.min(1, impact / 16))
   }
   audio.update(dt, sim, world, c, Math.hypot(p.x - oldX, p.z - oldZ), camera)
   graphics.render(
