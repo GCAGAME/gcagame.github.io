@@ -2,6 +2,10 @@
 export function createAudio() {
   let ctx,
     master,
+    carMix,
+    speakerGain,
+    speakerStream,
+    speaker,
     noiseBuffer,
     engine,
     motorLevel,
@@ -34,11 +38,12 @@ export function createAudio() {
     src.start()
     return g
   }
-  function activate() {
+  function prepare() {
     if (!ctx)
       try {
         ctx = new AudioContext()
         master = gain(ctx.destination, 0)
+        carMix = gain(master, 1)
         noiseBuffer = ctx.createBuffer(1, ctx.sampleRate * 3, ctx.sampleRate)
         const data = noiseBuffer.getChannelData(0)
         let prev = 0
@@ -70,14 +75,14 @@ export function createAudio() {
             voice.start()
             passBy.push({ spatial, voice, level })
           }
-        tire = noiseLoop(1200, 'bandpass', master)
+        tire = noiseLoop(1200, 'bandpass', carMix)
         engine = ctx.createOscillator()
         engine.type = 'sawtooth'
         engine.frequency.value = 36
         const fil = ctx.createBiquadFilter()
         fil.type = 'lowpass'
         fil.frequency.value = 165
-        motorLevel = gain(master)
+        motorLevel = gain(carMix)
         engine.connect(fil)
         fil.connect(motorLevel)
         engine.start()
@@ -85,18 +90,64 @@ export function createAudio() {
         ctx = null
         return
       }
+  }
+  function activate() {
+    prepare()
+    if (!ctx) return
     ctx.resume().catch(() => {})
     setActive(true)
   }
   function setActive(on) {
     muted = !on
-    if (master) master.gain.setTargetAtTime(on ? volume * 0.55 : 0, ctx.currentTime, 0.07)
+    const level = on ? volume * 0.55 : 0
+    master?.gain.setTargetAtTime(level, ctx.currentTime, 0.07)
+    speakerGain?.gain.setTargetAtTime(level, ctx.currentTime, 0.07)
+  }
+  function stopSpeaker() {
+    if (!speaker) return
+    speaker.pause()
+    speaker.srcObject = null
+    speaker = null
+    carMix.disconnect(speakerGain)
+    speakerGain.disconnect()
+    speakerStream.stream.getTracks().forEach(track => track.stop())
+    speakerGain = speakerStream = null
+  }
+  async function toggleControllerSpeaker() {
+    if (speaker) {
+      stopSpeaker()
+      return 'Controller car audio off.'
+    }
+    const devices = navigator.mediaDevices
+    const player = new Audio()
+    if (!devices || !player.setSinkId) return 'This browser cannot select a controller audio output.'
+    try {
+      // Select from OS audio endpoints. A gamepad connection alone supplies no audio device.
+      const device = devices.selectAudioOutput ? await devices.selectAudioOutput() :
+        (await devices.enumerateDevices()).find(d => d.kind === 'audiooutput' &&
+          !['default', 'communications'].includes(d.deviceId) && /wireless controller|dualshock|dualsense|gamepad/i.test(d.label))
+      if (!device) return 'No controller audio output found. Connect by USB and check Windows sound outputs.'
+      await player.setSinkId(device.deviceId)
+      prepare()
+      if (!ctx) return 'Game audio is unavailable.'
+      speakerStream = ctx.createMediaStreamDestination()
+      speakerGain = gain(speakerStream, muted ? 0 : volume * 0.55)
+      carMix.connect(speakerGain)
+      speaker = player
+      player.srcObject = speakerStream.stream
+      await player.play()
+      return 'Car audio enabled on ' + (device.label || 'the selected output') + '.'
+    } catch (error) {
+      stopSpeaker()
+      return error.name === 'NotAllowedError' ? 'Audio output selection was canceled or blocked.'
+        : 'Controller audio is unavailable. Check the selected output and try again.'
+    }
   }
   function setVolume(value) {
     volume = value
     setActive(!muted)
   }
-  function tone(freq, end, length, level = 0.12, type = 'sine', delay = 0, pan = 0) {
+  function tone(freq, end, length, level = 0.12, type = 'sine', delay = 0, pan = 0, output = master) {
     if (!ctx || muted || !master) return
     const t = ctx.currentTime + delay,
       o = ctx.createOscillator(),
@@ -112,23 +163,23 @@ export function createAudio() {
       const p = ctx.createStereoPanner()
       p.pan.value = pan
       g.connect(p)
-      p.connect(master)
+      p.connect(output)
       o.onended = () => {
         p.disconnect()
         g.disconnect()
       }
     } else {
-      g.connect(master)
+      g.connect(output)
       o.onended = () => g.disconnect()
     }
     o.start(t)
     o.stop(t + length + 0.03)
   }
-  function burst(length, freq, level, type = 'lowpass', delay = 0) {
+  function burst(length, freq, level, type = 'lowpass', delay = 0, output = master) {
     if (!ctx || muted) return
     const s = ctx.createBufferSource(),
       f = ctx.createBiquadFilter(),
-      g = gain(master),
+      g = gain(output),
       t = ctx.currentTime + delay
     s.buffer = noiseBuffer
     s.loop = true
@@ -156,14 +207,14 @@ export function createAudio() {
     reward: () =>
       [392, 494, 587, 784].forEach((v, i) => tone(v, v * 1.003, 0.36, 0.14, 'sine', i * 0.115)),
     horn: () => {
-      tone(349, 349, 0.33, 0.15, 'sawtooth')
-      tone(440, 438, 0.32, 0.12, 'triangle')
+      tone(349, 349, 0.33, 0.15, 'sawtooth', 0, 0, carMix)
+      tone(440, 438, 0.32, 0.12, 'triangle', 0, 0, carMix)
     },
     door: () => {
       burst(0.16, 400, 0.48)
       tone(92, 40, 0.1, 0.18, 'triangle')
     },
-    hit: () => burst(0.24, 620, 0.54),
+    hit: () => burst(0.24, 620, 0.54, 'lowpass', 0, carMix),
     thunder: () => {
       burst(2.1, 200, 0.72, 'lowpass', 0.48)
       tone(45, 28, 1.9, 0.2, 'sine', 0.65)
@@ -258,5 +309,9 @@ export function createAudio() {
       } else if (proximity > 0.5) tone(250, 205, 0.24, 0.028, 'triangle', 0, pan)
     }
   }
-  return { activate, setActive, setVolume, update, play: (name) => cue[name]?.() }
+  return {
+    activate, setActive, setVolume, update, toggleControllerSpeaker,
+    get speakerEnabled() { return !!speaker },
+    play: (name) => cue[name]?.(),
+  }
 }
