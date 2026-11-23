@@ -12,6 +12,8 @@ Choose **New Game**. Look around with the mouse or arrow keys, walk to the sedan
 
 The browser captures the mouse during play. Click the world to recapture it. Arrow keys also control your view. Escape pauses the game. In an embedded preview that restricts mouse capture, open the HTML directly in a browser.
 
+[View the front and rear interior comparisons for all five vehicles.](docs/vehicle-interiors/README.md)
+
 ## Controls
 
 | On foot | Action |
