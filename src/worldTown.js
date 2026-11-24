@@ -437,7 +437,7 @@ export function populateTown(w) {
         poly(front > 0 ? ridge : ridge.reverse(), 'solid', i ? 0x687a70 : 0x718882)
       }
       w.floors.push({ x, z, w: wid - 0.22, d: dep - 0.22, level: () => floorTop })
-      w.interiors.push({ x, z, w: wid - 0.1, d: dep - 0.1 })
+      w.interiors.push({ x, z, w: wid - 0.1, d: dep - 0.1, roof: h })
       // A furnished living room sits behind the working front door.
       box(x - 2, 0.4, z - 0.3, 2.29, 0.24, 1.04, 'solid', 0x677669)
       for (const dx of [-0.51, 0.51]) {
@@ -588,7 +588,7 @@ export function populateTown(w) {
             box(gX + dx, yy, benchZ + front * 0.39, 0.38, 0.034, 0.04, 'metal', frame)
         }
         door(gX, gFront, front, 0xb9beb4, 'garage door', 'garage', gw - 0.21, gh - 0.13, true)
-        w.interiors.push({ x: gX, z: gz, w: gw - 0.1, d: gd - 0.1 })
+        w.interiors.push({ x: gX, z: gz, w: gw - 0.1, d: gd - 0.1, roof: gh })
       } else {
         box(gX, 0, gz, gw, gh, gd, 'siding', tint)
         rectangle(gX, gz, gw, gd, 0, gh + 0.4)
@@ -900,6 +900,7 @@ export function populateTown(w) {
       // The ground level is open to the street. Upper parking decks share one
       // overhead collider and the support piers retain independent footprints.
       deck = 3.25
+      w.canopies.push({ x, z, w: width, d: depth, roof: deck })
       const face = z < -180 ? 1 : -1
       buildings.push({ x, z, w: width, d: depth })
       rectangle(x, z, fit.w, fit.d, deck, deck + fit.h)
@@ -952,7 +953,7 @@ export function populateTown(w) {
       frontZ = -90,
       h = 5.5
     buildings.push({ x, z, w: wid, d: dep })
-    w.interiors.push({ x, z, w: wid - 0.2, d: dep - 0.2 })
+    w.interiors.push({ x, z, w: wid - 0.2, d: dep - 0.2, roof: h })
     w.floors.push({ x, z, w: wid - 0.2, d: dep - 0.2, level: () => 0.11 })
     plate(x, 0.11, z, wid, dep, 'concrete', 0xe1d9be)
     const wall = (xx, zz, wi, dd) => {
@@ -1264,6 +1265,7 @@ export function populateTown(w) {
   w.floors.push({ x: 107, z: quayZ, w: 40, d: 2.6, level: () => surface, aboveWater: true })
   // Bus shelter, seats and municipal furniture by the main arterial.
   function shelter(x, z) {
+    w.canopies.push({ x, z: z - .32, w: 3.91, d: 1.94, roof: 2.55 })
     for (const dx of [-1.68, 1.68]) {
       box(x + dx, 0.11, z, 0.13, 2.45, 0.13, 'metal', iron)
       box(x + dx, 0.11, z - 0.91, 0.13, 2.45, 0.13, 'metal', iron)

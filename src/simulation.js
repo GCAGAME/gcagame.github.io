@@ -1,3 +1,5 @@
+import { createArrestCinematic } from './arrest-cinematic.js'
+import { walk, presentPedestrian } from './hardcore-pedestrians.js'
 import { clearance, limitX, limitZ, carMargins } from './boundary.js'
 import { boxHull, circleHits, sweepHull } from './collision.js'
 import * as THREE from 'three'
@@ -614,31 +616,57 @@ export function createSimulation(scene, camera, world) {
     if (snapping || t < 1) camera.position.copy(temp)
     else camera.position.lerp(temp, 1 - Math.exp(-14 * dt))
   }
+  let custody, shotFacing, shotCruiser, shotTime
+  function endArrestShot() {
+    custody?.end()
+    shotCruiser = null
+  }
   function arrestShot(officer, t, dt) {
-    if (current) {
-      avatar.group.visible = true
+    if (t === 0) {
+      custody ||= createArrestCinematic(scene)
+      shotTime = 0
+      if (current) {
+        if (transfer?.mode === 'enter') {
+          current.model.setDoorOpen?.(0)
+          transfer = null
+        }
+        enterExit()
+      }
+      shotFacing = Math.atan2(officer.x - player.x, officer.z - player.z)
+      shotCruiser = patrolCars.filter(c => c.active && !c.taken && distance(c,player)<24)
+        .sort((a,b) => distance(a,player)-distance(b,player))[0]
+    }
+    custody.restorePose()
+    const elapsedShot = Math.max(0,t-shotTime)
+    shotTime = t
+    avatar.group.visible = true
+    if (transfer?.mode === 'exit') presentDriver(elapsedShot)
+    else if (current) {
       avatar.group.scale.setScalar(driverSeat(current, avatar))
       avatar.group.position.copy(seatAnchor)
       avatar.group.quaternion.copy(current.model.group.quaternion)
       current.model.showCockpit(false, current)
       posePerson(avatar, dt, 0, { driver: true })
     } else {
-      avatar.group.visible = true
       avatar.group.scale.setScalar(1)
-      avatar.group.position.set(player.x, player.y, player.z)
-      avatar.group.rotation.set(0, Math.atan2(player.x - officer.x, player.z - officer.z), 0)
-      posePerson(avatar, dt, 0, { crouch: t > .9 })
+      avatar.group.position.set(player.x,player.y,player.z)
+      avatar.group.rotation.set(0,shotFacing,0)
     }
-    const facing = Math.atan2(officer.x - player.x, officer.z - player.z)
-    const close = t > 1.65
-    const pan = facing + (close ? .7 : 1.45) + .12 * t
-    const dolly = (current ? 2.3 : 0) + (close ? 3.4 : 5.4)
-    targetCam.set((player.x + officer.x) / 2, player.y + (close ? .98 : 1.18), (player.z + officer.z) / 2)
-    desiredCam.set(targetCam.x + Math.sin(pan) * dolly, targetCam.y + (close ? .45 : 1.05),
-      targetCam.z + Math.cos(pan) * dolly)
-    chase(targetCam, desiredCam, t < .12 ? 1 : dt)
+    const sn = Math.sin(shotFacing), cs = Math.cos(shotFacing)
+    const gap = current ? current.spec.width*.5+.45 : .52
+    const goal = {x: player.x+sn*gap, z: player.z+cs*gap}
+    const stride = t > .18 ? walk(world,{player,vehicle:current,cars,traffic,patrolCars,npcs},officer,goal,2.45,elapsedShot) : 0
+    officer.yaw = Math.atan2(officer.x-player.x,officer.z-player.z)
+    presentPedestrian(officer,player,dt,stride)
+    const wrist = custody.frame(avatar,officer,current,shotCruiser,shotFacing,t,dt,!!transfer)
+    const close = t >= 2.05 && t < 4.15
+    const pan = shotFacing + (close ? .96 : .99) + Math.min(t,5)*.057
+    const dolly = (close ? 1.16 : 3.8) + (current ? .8 : 0)
+    if (close) targetCam.copy(wrist)
+    else targetCam.set((player.x+officer.x)/2,player.y+1.08,(player.z+officer.z)/2)
+    desiredCam.set(targetCam.x+Math.sin(pan)*dolly,targetCam.y + (close ? .28 : .65),targetCam.z+Math.cos(pan)*dolly)
+    chase(targetCam,desiredCam,t<.12 || (close && t-elapsedShot<2.05) ? 1 : dt)
     camera.lookAt(targetCam)
-    posePerson(officer.model, dt, 0, { look: true })
   }
   function traceCar(c, x, z, yaw, dx = 0, dz = 0, turn = 0, footprint = null, hit = null) {
     const width = c.spec.width,
@@ -2183,7 +2211,7 @@ export function createSimulation(scene, camera, world) {
     patrolCars,
     setHardcore,
     spawnCityPerson: actor,
-    dispatchPatrol, presentOccupant, presentTheftEntry, arrestShot, driverPath, availableToSteal, stealCar, releaseStolen,
+    dispatchPatrol, presentOccupant, presentTheftEntry, arrestShot, endArrestShot, driverPath, availableToSteal, stealCar, releaseStolen,
     ownedCar: c => hooks.isOwned?.(c.id) ?? (c.id === 'sedan'),
     stopPatrol,
     alertTraffic,

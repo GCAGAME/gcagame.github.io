@@ -447,6 +447,7 @@ function configureMode() {
 }
 function finishArrestScene() {
   if (screen !== 'arrestScene') return
+  sim.endArrestShot()
   arrestScene = null
   openPanel('recovery')
 }
@@ -459,7 +460,7 @@ function endEncounter(reason, officer) {
     clearInput()
     unlock()
     audio.setActive(false)
-    arrestScene = { officer, start: performance.now() }
+    arrestScene = { officer, elapsed: 0 }
     sim.arrestShot(officer, 0, 0)
     ui.cinematic()
   } else openPanel('recovery')
@@ -968,11 +969,14 @@ function frame(now) {
     else ui.menuInput(code)
   }, previousScreen !== 'hud', now, mode === 'hardcore' && !sim?.vehicle)
   if (screen === 'arrestScene' && arrestScene) {
-    const t = (now - arrestScene.start) / 1000
-    sim.arrestShot(arrestScene.officer, t, Math.min(.1, (now - previousFrame) / 1000))
+    // Keep the cuffing beats visible through a shader compilation or tab switch.
+    const step = Math.max(0, Math.min(.16, (now - previousFrame) / 1000))
+    arrestScene.elapsed += step
+    const t = arrestScene.elapsed
+    sim.arrestShot(arrestScene.officer, t, step)
     graphics.render(settings, false, 0, 0, climate.state.wet)
     previousFrame = now
-    if (t >= 3.4) finishArrestScene()
+    if (t >= 5.35) finishArrestScene()
     return
   }
   if (screen !== 'hud' || !active) {
@@ -1061,7 +1065,7 @@ function frame(now) {
     dx,
     dy,
     c.wet,
-    !!sim.vehicle && sim.firstPerson,
+    !!sim.vehicle && sim.firstPerson && !world.sheltered(camera.position.x,camera.position.y,camera.position.z),
     c.clock,
   )
   hudAge += dt
@@ -1131,7 +1135,7 @@ async function boot() {
     await wait()
     sim = createSimulation(scene, camera, world)
     climate = createClimate(scene, renderer, () => audio.play('thunder'))
-    graphics = createRendering(renderer, scene, camera)
+    graphics = createRendering(renderer, scene, camera, world)
     story = createCampaign(world, sim, {
       changed,
       notify: info,

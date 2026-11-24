@@ -216,6 +216,13 @@ for (let slot = 0; slot < 4; slot++) {
   assert.equal(model.active.getClip().name, 'driver')
   if (model.style === avatar.style) assert.equal(model.active.getClip(), avatar.actions.driver.getClip())
   const local = car.model.group.matrixWorld.clone().invert()
+  for (const mesh of [...model.near, ...model.far]) {
+    const vertex = new THREE.Vector3()
+    for (let i = 0; i < mesh.geometry.attributes.position.count; i++) {
+      mesh.getVertexPosition(i, vertex).applyMatrix4(mesh.matrixWorld).applyMatrix4(local)
+      assert(vertex.y < car.spec.roof - .02, model.style + ' protrudes through the sedan roof')
+    }
+  }
   const joint = (name) => model.character.getObjectByName('Bip01_' + name)
     .getWorldPosition(new THREE.Vector3()).applyMatrix4(local)
   for (const side of ['L_', 'R_']) {

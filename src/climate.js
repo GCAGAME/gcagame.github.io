@@ -306,7 +306,7 @@ export function createClimate(scene, renderer, onThunder) {
     const exposure =
       (state.night ? 1.09 : 0.91 + 0.17 * state.clouds + 0.08 * gold) + (indoors ? 0.24 : 0)
     renderer.toneMappingExposure += (exposure - renderer.toneMappingExposure) * Math.min(1, dt * 2)
-    rain.visible = state.wet > 0.025 && !indoors
+    rain.visible = state.wet > 0.025
     snow.visible = state.snow > 0.025 && !indoors
     splashes.visible = rain.visible
     if (splashes.visible) {
@@ -318,7 +318,8 @@ export function createClimate(scene, renderer, onThunder) {
             x = splashX + seeds[i][0] * 0.65,
             z = splashZ + seeds[i][2] * 0.65
           origins[j] = x
-          origins[j + 1] = world.height(x, z) + 0.09
+          const y = world.height(x, z) + 0.09
+          origins[j + 1] = world.sheltered(x,y,z) ? -1000 : y
           origins[j + 2] = z
         }
         splashG.attributes.position.needsUpdate = true
@@ -338,10 +339,11 @@ export function createClimate(scene, renderer, onThunder) {
           const j = i * 6,
             px = x + py * 0.13
           pos[j] = px
-          pos[j + 1] = py
+          const yRain = world.sheltered(camera.position.x + px, camera.position.y + py, camera.position.z + z) ? -1000 : py
+          pos[j + 1] = yRain
           pos[j + 2] = z
           pos[j + 3] = px + 0.065
-          pos[j + 4] = py + 0.52
+          pos[j + 4] = yRain + 0.52
           pos[j + 5] = z + 0.04
         }
         if (snow.visible) {

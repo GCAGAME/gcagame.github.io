@@ -64,6 +64,14 @@ with sync_playwright() as pw:
       window.activeMotes = () => briar.scene.getObjectByName('County outfitters').children
         .filter(o => o.isMesh && o.geometry.type==='OctahedronGeometry' && o.visible)
     }""")
+    assert ev("""() => {
+      const {world,graphics,camera,settings}=briar
+      world.setWetness(1)
+      graphics.render({...settings(),reflections:true},false,0,0,1)
+      world.setWetness(0)
+      return world.sheltered(22,.2,-98) && !world.sheltered(22,6,-98) &&
+        !world.sheltered(14,.2,-87) && world.sheltered(28,.2,-72)
+    }""")
     page.mouse.down(button='right')
     page.mouse.click(470, 300)
     page.wait_for_function('briar.hardcore.arms.hud().loaded === 7')
@@ -164,7 +172,14 @@ with sync_playwright() as pw:
     assert page.locator('#arrest-scene').is_visible()
     camera_start = ev('briar.camera.position.toArray()')
     page.wait_for_function('start => briar.camera.position.toArray().some((v,i)=>Math.abs(v-start[i])>.02)', arg=camera_start)
+    page.wait_for_function("""() => {
+      const {scene}=briar, player=scene.getObjectByName('Player')
+      const cuffs=['L','R'].map(side=>scene.getObjectByName(side+' wrist cuff'))
+      return cuffs.every((c,i)=>c?.visible && c.children[1].rotation.z > -.02 &&
+        c.position.distanceTo(player.getObjectByName('Bip01_'+['L','R'][i]+'_Hand').getWorldPosition(c.position.clone())) < .055)
+    }""")
     screen('recovery')
+    assert not ev("!!briar.scene.getObjectByName('County arrest lighting and cuffs')")
     assert page.locator('#sheet-title').text_content() == 'Under arrest'
     page.keyboard.press('Escape')
     screen('recovery')

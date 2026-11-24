@@ -1,7 +1,7 @@
 import { createNavigation } from './navigation.js'
 import { clearance } from './boundary.js'
 import { isWorldOccluded } from './hardcore-sight.js'
-import { presentPedestrian, standNear, walk } from './hardcore-pedestrians.js'
+import { presentPedestrian, standNear, walk, patrolStep } from './hardcore-pedestrians.js'
 
 const blocks = [
   [[-13, 61.5], [-13, 52.1], [-38, 52.1]],
@@ -155,7 +155,7 @@ export function createHardcoreCity(scene, world, sim, hooks = {}) {
     const spot = standNear(world, sim, p, home)
     Object.assign(p, spot || { ...home, y: world.height(home.x, home.z) }, {
       health: p.maxHealth, inactive: p.slot !== 0, inVehicle: false, ride: null, interactive: false,
-      managedAI: true, file: null, goal: null, speedAI: 0, patrolEnd: 1, roadPath: null,
+      managedAI: true, roadWatch: null, footWatch: null, detour: null, remountAt: 0, file: null, goal: null, speedAI: 0, patrolEnd: 1, roadPath: null,
     })
   }
   function extra(slot, role, home) {
@@ -466,11 +466,16 @@ export function createHardcoreCity(scene, world, sim, hooks = {}) {
       const car = p.ride
       if (car.taken || car === sim.vehicle || !car.driverActive) { stopRiding(p); return }
       car.pursuitTarget = point(last)
-      if (gap > (sight ? 12 : 10) || (movingCar && gap > 8)) return
+      if (gap > (sight ? 12 : 10) || (movingCar && gap > 8)) {
+        if (!p.roadWatch || distance(car, p.roadWatch) > 1.5) p.roadWatch = { ...point(car), at: clock }
+        if (clock - p.roadWatch.at < 4) return
+        p.remountAt = clock + 14
+      }
+      p.roadWatch = null
       car.speed = 0
       car.pursuitTarget = null
       if (!stopRiding(p)) return
-    } else if (gap > 21 || (movingCar && gap > 12)) {
+    } else if (clock >= p.remountAt && (gap > 21 || (movingCar && gap > 12))) {
       const car = sim.patrolCars[p.slot]
       if (car && car.active && !car.taken && car !== sim.vehicle && distance(p, car) < gap * .72) {
         if (distance(p, car) <= 3.9) {
@@ -544,7 +549,7 @@ export function createHardcoreCity(scene, world, sim, hooks = {}) {
       p.aiStep = (p.aiStep || 0) + dt
       const d = distance(p, player)
       if (p.aiStep < (d < 34 ? .028 : d < 82 ? .095 : .44)) continue
-      const speed = walk(world, sim, p, p.goal, p.speedAI, p.aiStep)
+      const speed = p.role === 'police' ? patrolStep(world, sim, p, clock) : walk(world, sim, p, p.goal, p.speedAI, p.aiStep)
       presentPedestrian(p, player, p.aiStep, speed)
       p.aiStep = 0
     }

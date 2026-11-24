@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 
-export function createRendering(renderer, scene, camera) {
+export function createRendering(renderer, scene, camera, world) {
   const hdr = renderer.extensions.has('EXT_color_buffer_float')
   const target = new THREE.WebGLRenderTarget(2, 2, {
     type: hdr ? THREE.HalfFloatType : THREE.UnsignedByteType,
@@ -25,17 +25,20 @@ export function createRendering(renderer, scene, camera) {
     clock: uni(0),
     aa: uni(1),
     wet: uni(0),
+    cameraWorld: uni(camera.matrixWorld),
     ip: uni(new THREE.Matrix4()),
     projection: uni(camera.projectionMatrix),
   }
   const frag = [
+    world.rainShader,
+    'uniform mat4 cameraWorld;',
     'varying vec2 uv0;uniform sampler2D sceneColor,depthMap;uniform vec2 pixel,clip,drift;uniform vec4 flags,effects;uniform float aa,wet,glass,clock;uniform mat4 ip,projection;',
     'float zAt(vec2 p){float d=texture2D(depthMap,p).x;return clip.x*clip.y/(clip.y-(clip.y-clip.x)*d);}',
     'vec3 viewPos(vec2 uv){vec4 p=ip*vec4(uv*2.-1.,texture2D(depthMap,uv).r*2.-1.,1.);return p.xyz/p.w;}',
     'float lum(vec3 c){return dot(c,vec3(.2126,.7152,.0722));}',
     'void main(){vec2 uv=uv0;vec3 base=texture2D(sceneColor,uv).rgb,l=texture2D(sceneColor,uv-vec2(pixel.x,0)).rgb,r=texture2D(sceneColor,uv+vec2(pixel.x,0)).rgb,t=texture2D(sceneColor,uv+vec2(0,pixel.y)).rgb,b=texture2D(sceneColor,uv-vec2(0,pixel.y)).rgb;vec3 avg=(l+r+t+b)*.25;float d=zAt(uv);float lo=min(min(lum(l),lum(r)),min(lum(t),lum(b))),hi=max(max(lum(l),lum(r)),max(lum(t),lum(b)));vec3 c=mix(base,avg,aa*smoothstep(.10,.42,(hi-lo)/(hi+.13))*.42);',
     'if(flags.x>.5&&d<115.){float occ=0.;float scale=clamp(95./(d+2.),1.5,7.);float count=flags.x>1.5?12.:8.;for(int i=0;i<12;i++){if(float(i)>=count)break;float a=float(i)*6.283185/count;float dz=d-zAt(uv+pixel*scale*vec2(cos(a),sin(a)));occ+=smoothstep(.03,.35,dz)*(1.-smoothstep(.6,2.8,dz));}c*=1.-occ*(.256/count);}',
-    'if(effects.w>.5&&wet>.1&&d<65.){vec3 pos=viewPos(uv);vec3 n=normalize(cross(dFdx(pos),dFdy(pos)));vec3 rd=reflect(normalize(pos),n);float mask=smoothstep(.6,.91,n.y)*smoothstep(.8,.24,lum(base));if(mask>.02){for(int i=1;i<=14;i++){if(i>8&&effects.w<1.5)break;float f=float(i)*(effects.w>1.5?.75:1.);vec3 q=pos+rd*(.16*f*f);vec4 screen=projection*vec4(q,1.);vec2 s=screen.xy/screen.w*.5+.5;if(s.y<.02||s.y>.98||s.x<.02||s.x>.98)break;float gap=-q.z-zAt(s);if(gap>0.&&gap<1.8){c=mix(c,texture2D(sceneColor,s).rgb,mask*wet*.22);break;}}}}',
+    'if(effects.w>.5&&wet>.1&&d<65.){vec3 pos=viewPos(uv);vec3 n=normalize(cross(dFdx(pos),dFdy(pos)));vec3 rd=reflect(normalize(pos),n);vec3 wp=(cameraWorld*vec4(pos,1.)).xyz;float mask=rainSheltered(wp)?0.:smoothstep(.6,.91,(mat3(cameraWorld)*n).y)*(1.-smoothstep(.24,.8,lum(base)));if(mask>.02){for(int i=1;i<=14;i++){if(i>8&&effects.w<1.5)break;float f=float(i)*(effects.w>1.5?.75:1.);vec3 q=pos+rd*(.16*f*f);vec4 screen=projection*vec4(q,1.);vec2 s=screen.xy/screen.w*.5+.5;if(s.y<.02||s.y>.98||s.x<.02||s.x>.98)break;float gap=-q.z-zAt(s);if(gap>0.&&gap<1.8){c=mix(c,texture2D(sceneColor,s).rgb,mask*wet*.22);break;}}}}',
     'if(flags.y>.5){vec3 bright=vec3(0.);for(int i=0;i<4;i++){float a=float(i)*1.5708;bright+=max(texture2D(sceneColor,uv+pixel*4.*vec2(cos(a),sin(a))).rgb-vec3(1.25),0.);}c+=min(bright,vec3(4.))*.019;}',
     'if(flags.z>.5){c=mix(c,(texture2D(sceneColor,uv+drift*.5).rgb+texture2D(sceneColor,uv+drift).rgb)*.5,.26);}',
     'if(effects.y>.5){float s=smoothstep(9.,65.,abs(d-effects.z));vec2 dx=pixel*3.*s;c=mix(c,(texture2D(sceneColor,uv+dx).rgb+texture2D(sceneColor,uv-dx).rgb+texture2D(sceneColor,uv+vec2(dx.x,-dx.y)).rgb)*.3333,s*.46);}',
@@ -46,7 +49,7 @@ export function createRendering(renderer, scene, camera) {
     '}',
   ]
     .join('\n')
-    .replace('smoothstep(.8,.24,lum(base))', '(1.-smoothstep(.24,.8,lum(base)))')
+
   const post = new THREE.Scene(),
     ortho = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
   const geo = new THREE.BufferGeometry()

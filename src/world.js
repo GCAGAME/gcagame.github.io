@@ -50,7 +50,7 @@ export function createWorld(scene) {
     trees = [],
     rocks = [],
     floors = [],
-    interiors = []
+    canopies = [], interiors = []
   const observer = { x: -12, z: 67 }
   let quality = 'high',
     elapsed = 0,
@@ -916,10 +916,36 @@ export function createWorld(scene) {
     dynamic,
     signalOpen,
     floors,
-    interiors,
+    interiors, canopies,
     observer,
   }
   populateTown(context)
+  const roofs = interiors.concat(canopies)
+  function sheltered(x, y, z) {
+    return roofs.some(r => y < r.roof && inRect(x, z, r))
+  }
+  // Use the same volumes for precipitation, pavement shading and reflections.
+  const rainShader = 'bool rainSheltered(vec3 p){' + roofs.map(r =>
+    `if(p.y < ${r.roof.toFixed(3)} && all(lessThanEqual(abs(p.xz - vec2(${r.x.toFixed(3)},${r.z.toFixed(3)})),vec2(${(r.w/2).toFixed(3)},${(r.d/2).toFixed(3)})))) return true;`
+  ).join('\n') + 'return false;}'
+  for (const mat of [m.asphalt, m.concrete]) {
+    const road = mat === m.asphalt
+    mat.roughness = road ? .95 : .88
+    if (road) mat.metalness = .04
+    mat.onBeforeCompile = shader => {
+      shader.uniforms.surfaceRain = dampGround
+      shader.vertexShader = 'varying vec3 rainPosition;\n' + shader.vertexShader.replace('#include <project_vertex>',
+        '#include <project_vertex>\nrainPosition=(modelMatrix*vec4(transformed,1.)).xyz;')
+      shader.fragmentShader = rainShader + '\nvarying vec3 rainPosition;uniform float surfaceRain;\n' + shader.fragmentShader
+      shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>',
+        '#include <color_fragment>\nfloat rainAmount=rainSheltered(rainPosition)?0.:surfaceRain;' +
+        (road ? 'diffuseColor.rgb*=1.-rainAmount*.27;' : ''))
+        .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor*=1.-rainAmount*' + (road ? '.758;' : '.432;'))
+      if (road) shader.fragmentShader = shader.fragmentShader.replace('#include <metalnessmap_fragment>',
+        '#include <metalnessmap_fragment>\nmetalnessFactor+=rainAmount*.28;')
+    }
+    mat.customProgramCacheKey = () => 'rain-' + mat.name
+  }
   // Short grass follows meadow margins. Damp hollows support larger fern stands.
   // A separate seeded sequence keeps the county's trees and rock colliders reproducible.
   const scatter = generator(743195)
@@ -1091,10 +1117,7 @@ export function createWorld(scene) {
   function setWetness(value = 0) {
     wet = clamp(Number(value) || 0, 0, 1)
     dampGround.value = wet
-    m.asphalt.roughness = 0.95 - wet * 0.72
-    m.asphalt.metalness = 0.04 + wet * 0.28
-    m.asphalt.color.setScalar(1 - wet * 0.27)
-    m.concrete.roughness = 0.88 - wet * 0.38
+
   }
   function setQuality(value, distance) {
     const q = String(value || 'high').toLowerCase()
@@ -1161,7 +1184,7 @@ export function createWorld(scene) {
     waterAt,
     waterLevel,
     signalOpen,
-    indoors,
+    indoors, sheltered, rainShader,
     get wetness() {
       return wet
     },

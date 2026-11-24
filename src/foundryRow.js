@@ -123,7 +123,7 @@ export function foundryRow(w, { door, sign, shade }) {
     for (const end of [left, right]) wall(end, z, 0.25, depth)
     plate(x, 0.109, z, width, depth, 'shopTile', label === 'showroom' ? 0xaab1b1 : 0xf0e1ca)
     w.floors.push({ x, z, w: width - 0.13, d: depth - 0.13, level: () => 0.109 })
-    w.interiors.push({ x, z, w: width - 0.1, d: depth - 0.1 })
+    w.interiors.push({ x, z, w: width - 0.1, d: depth - 0.1, roof: eave })
     for (const [a, b] of [
       [left, entrance - 0.83],
       [entrance + 0.83, right],

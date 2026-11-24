@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import * as THREE from 'three'
 import { boxHull, circleHits } from '../src/collision.js'
+import { patrolStep } from '../src/hardcore-pedestrians.js'
 import { makePerson } from '../src/people.js'
 import { createHardcoreCity } from '../src/hardcore-city.js'
 
@@ -179,3 +180,15 @@ assert.equal(street().length, 4)
 assert.equal(new Set(sim.npcs).size, 11)
 city.setEnabled(false)
 console.log('City AI passed: witnesses, cruiser alarm, covered searches, pursuit scaling and decay, arrest, NPC fights, civilian flight, hostile damage, recovery, driver cases and repeated mode switches.')
+
+// The direct line to an assignment runs into the middle of a long wall.
+const obstruction = { poly: boxHull(0, 0, .8, 9) }
+walls.push(obstruction)
+const unit = { x: -3, y: 0, z: 0, goal: { x: 4, z: 0 }, speedAI: 3, aiStep: 1/30, side: 1 }
+let around = false
+for (let i = 0; i < 22*30; i++) {
+  patrolStep(world, sim, unit, i/30)
+  around ||= Math.abs(unit.z) > 4.5
+  assert(!world.blocked(unit.x,unit.z,.26))
+}
+assert(around && Math.hypot(unit.x-4,unit.z)<.5, 'patrol walked around a wall and resumed its assignment')
