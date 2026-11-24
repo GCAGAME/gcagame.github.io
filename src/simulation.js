@@ -707,7 +707,7 @@ export function createSimulation(scene, camera, world) {
         if (offsetX * offsetX + offsetZ * offsetZ > range * range) continue
         check(boxHull(other.x, other.z, other.spec.width, other.spec.length, other.yaw), other)
       }
-    if (hit && c === current && travel > 0) for (const p of npcs) {
+    if (hardcore && hit && c === current && travel > 0) for (const p of npcs) {
       if (!exposedPerson(p) || Math.abs(p.x - midX) > halfX + .32 ||
           Math.abs(p.z - midZ) > halfZ + .32 || p.y > top || p.y + 1.75 < bottom) continue
       check(boxHull(p.x, p.z, .48, .48), null, p)
@@ -791,6 +791,14 @@ export function createSimulation(scene, camera, world) {
     for (const car of traffic) if (!car.reckless && Math.hypot(car.x - x, car.z - z) < 24)
       car.alertUntil = elapsed + 3
   }
+  let fatalCrash = false
+  function injureDriver(damage) {
+    if (!damage || player.health <= 0) return
+    const before = player.health
+    player.health = Math.max(0, before - damage)
+    fatalCrash = player.health === 0
+    hooks.onDriverInjury?.(Math.ceil(before - player.health))
+  }
   function resolveImpact(c, hit) {
     const other = hit.other
     const result = measureImpact(c, other, hit.nx, hit.nz)
@@ -818,7 +826,7 @@ export function createSimulation(scene, camera, world) {
     const deltaV = other && other === current ? result.deltaB : result.deltaA
     const damage = involved ? impactInjury(deltaV) : 0
     if (involved) {
-      player.health = Math.max(0, player.health - damage)
+      injureDriver(damage)
       impactSpeed = result.closingSpeed
       impactG = deltaV / (.1 * STANDARD_GRAVITY)
       current.bounce = .025 + .13 * Math.min(1, deltaV / 16)
@@ -924,7 +932,7 @@ export function createSimulation(scene, camera, world) {
       }
     }
     if (hardcore) trackRamIntent(c, dt, throttle && !c.braking)
-    const hit = hardcore ? {} : null
+    const hit = {}
     const fraction = traceCar(c, c.x, c.z, c.yaw, nx - c.x, nz - c.z, yawStep, null, hit)
     if (fraction < 1) {
       const travel = Math.hypot(nx - c.x, nz - c.z) + Math.abs(yawStep) * s.length
@@ -951,7 +959,7 @@ export function createSimulation(scene, camera, world) {
           if (abs > 2.4) {
             const damage = Math.max(0, (abs - 2) * 0.7)
             c.condition = Math.max(12, c.condition - damage)
-            player.health = Math.max(15, player.health - damage * 0.36)
+            injureDriver(impactInjury(measureImpact(c, hit.other, hit.nx, hit.nz).deltaA))
             impactSpeed = abs
             // Average collision deceleration over a modeled 100 ms contact interval.
             impactG = Math.abs(c.speed - reboundSpeed) / (0.1 * STANDARD_GRAVITY)
@@ -1859,6 +1867,7 @@ export function createSimulation(scene, camera, world) {
     return hardcore && !current && !seat && !approachDoor && !transfer && !player.swimming && player.health > 0
   }
   function respawn() {
+    fatalCrash = false
     approachDoor = null
     transfer?.car.model.setDoorOpen?.(0)
     transfer = null
@@ -1897,6 +1906,7 @@ export function createSimulation(scene, camera, world) {
     pendingX = 0,
     pendingY = 0
   function reset(rollTraffic = true) {
+    fatalCrash = false
     approachDoor = null
     transfer?.car.model.setDoorOpen?.(0)
     transfer = null
@@ -2246,6 +2256,7 @@ export function createSimulation(scene, camera, world) {
     get impactG() {
       return impactG
     },
+    get fatalCrash() { return fatalCrash },
     get impactSpeed() {
       return impactSpeed
     },

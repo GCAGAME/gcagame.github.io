@@ -763,6 +763,12 @@ export function createUI(actions = {}) {
     )
     switch (view) {
       case 'recovery':
+        if (data.outcome === 'crash') {
+          setText('sheet-title', 'Fatal crash')
+          html = '<p class="dialogue-copy">You lost all your HP in the crash.</p>' +
+            rowButton('data-action="recover"', 'Respawn at Cedar House', 'main')
+          break
+        }
         setText('sheet-title', data.outcome === 'arrest' ? 'Under arrest' : 'You’re down')
         html = '<p class="dialogue-copy">' +
           (data.outcome === 'arrest' ? 'County patrol has taken you into custody.' : 'County rescue is taking you home.') +

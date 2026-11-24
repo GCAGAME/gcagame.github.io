@@ -177,6 +177,20 @@ assert.equal(sim.patrolCars.length, 5)
 assert.equal(sim.traffic.filter((v) => v.reckless).length, 1)
 console.log('PASS collision severity, minor impacts, ramming, reckless traffic, patrol driving and theft, ownership, respawn, persistence, mode isolation.')
 
+// Normal drivers use the same injury curve, including when already below 15 HP.
+sim.setHardcore(false, hooks)
+for (const [speed, health, fatal] of [[3,100,false], [20,100,false], [20,10,true]]) {
+  placePlayerCar(350, speed === 3 ? 86.4 : 95, speed)
+  sim.player.health = health
+  step(1)
+  assert.equal(sim.fatalCrash, fatal)
+  if (speed === 3) assert.equal(sim.player.health, health)
+  else assert(sim.player.health < health)
+  if (fatal) assert.equal(sim.player.health, 0)
+}
+sim.respawn()
+assert.equal(sim.fatalCrash,false)
+
 // The simulation above isolates impact forces. Exercise the same extra cars
 // on the generated county's roads with its actual buildings and other cars.
 const countyScene = new THREE.Scene(), county = createWorld(countyScene)

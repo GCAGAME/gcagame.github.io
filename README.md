@@ -14,6 +14,8 @@ Choose **New Game**. Look around with the mouse or arrow keys, walk to the sedan
 
 Select a mode above **New Game** or **Continue**. Normal Mode uses the original county, campaign and survival rules. Hardcore Mode adds armed encounters, dangerous traffic and county patrols to that same journey. Each mode has its own manual save and autosave. Earlier saves appear under Normal Mode.
 
+In both modes, a hard crash costs HP based on the impact. If a crash takes your last HP, choose **Respawn at Cedar House** to continue without a rescue fee.
+
 In Hardcore, you start with 100 HP and a Rook Sidearm. On foot, hold the right mouse button to aim and the left to fire. Press **R** to reload, **Q** to cycle weapons, or **1–3** to select an owned weapon. Use **E** for doors, vehicles and other interactions. On a standard controller, use the left and right triggers to aim and fire, D-pad down to reload and the right shoulder button to cycle weapons. Driving controls stay the same.
 
 The **Parcel Exchange Outfitters** counter inside the post office and **North Ridge Outfitters** on the back of the trailhead board sell weapons and ammunition for campaign money. Open the county map and choose either outfitter to set a route.

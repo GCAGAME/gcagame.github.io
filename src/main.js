@@ -438,6 +438,7 @@ function configureMode() {
       (id === 'sports' && story.state.owned.includes('ownership')) ||
       (id === 'offroad' && story.state.chapter === 2),
     onCrime: (kind, actor, x, z) => city.reportCrime(kind === 'recklessDriving' ? 'reckless' : kind, actor, { x, z, y: actor.y }),
+    onDriverInjury: hp => info('Crash injury Â· âˆ’' + hp + ' HP'),
     onCrash: event => city.alertDanger(event, Math.min(25, 5 + event.closingSpeed)),
     onPedestrianImpact: (npc, damage) => city.damageNpc(npc, damage, sim.player),
   })
@@ -452,9 +453,9 @@ function finishArrestScene() {
   openPanel('recovery')
 }
 function endEncounter(reason, officer) {
-  if (outcome || mode !== 'hardcore' || applying || screen !== 'hud') return
-  outcome = sim.player.health <= 0 ? 'down' : reason
-  arms.resetAction()
+  if (outcome || (mode !== 'hardcore' && reason !== 'crash') || applying || screen !== 'hud') return
+  outcome = reason === 'crash' ? 'crash' : sim.player.health <= 0 ? 'down' : reason
+  arms?.resetAction()
   if (outcome === 'arrest' && officer) {
     screen = 'arrestScene'
     clearInput()
@@ -468,14 +469,15 @@ function endEncounter(reason, officer) {
 }
 function recover() {
   if (!outcome || screen !== 'recovery') return
-  const fee = Math.min(story.state.money, outcome === 'arrest' ? 25 : 15)
+  const crash = outcome === 'crash'
+  const fee = crash ? 0 : Math.min(story.state.money, outcome === 'arrest' ? 25 : 15)
   story.state.money -= fee
   interactions.stand(false)
-  city.clearWanted()
+  city?.clearWanted()
   sim.respawn()
   survival.reset()
-  arms.resetAction()
-  arms.clearParticles()
+  arms?.resetAction()
+  arms?.clearParticles()
   outcome = null
   routeAge = 100
   resume()
@@ -663,6 +665,7 @@ function saveGame(manual = false) {
   const data = {
     version: 1,
     mode,
+    ...(outcome === 'crash' ? { fatalCrash: true } : {}),
     ...(mode === 'hardcore' ? { hardcore: { arms: arms.serialize(), city: city.serialize(), outcome } } : {}),
     time: Date.now(),
     sim: sim.serialize(),
@@ -699,6 +702,7 @@ function loadGame(manual = false) {
   }
   const previous = active
     ? {
+        fatalCrash: outcome === 'crash',
         hardcore: mode === 'hardcore' && { arms: arms.serialize(), city: city.serialize(), outcome },
         sim: sim.serialize(),
         story: JSON.parse(JSON.stringify(story.state)),
@@ -720,6 +724,10 @@ function loadGame(manual = false) {
       arms.restore(v.hardcore?.arms)
       outcome = ['arrest', 'down'].includes(v.hardcore?.outcome) ? v.hardcore.outcome : null
       if (outcome === 'down') sim.player.health = 0
+    }
+    if (v.fatalCrash === true) {
+      outcome = 'crash'
+      sim.player.health = 0
     }
     waypoint =
       v.waypoint && Number.isFinite(v.waypoint.x) && Number.isFinite(v.waypoint.z)
@@ -1010,6 +1018,7 @@ function frame(now) {
     wet: c.wet,
     night: c.night,
   })
+  if (sim.fatalCrash) return endEncounter('crash')
   if (mode === 'hardcore') {
     if (pad.held.has('PadFire')) arms.trigger(true)
     else if (lastPadFire) arms.trigger(false)
