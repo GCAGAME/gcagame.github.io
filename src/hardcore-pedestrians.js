@@ -10,7 +10,6 @@ const visor = new THREE.BoxGeometry(.145, .014, .074)
 const badge = new THREE.BoxGeometry(.034, .042, .007)
 const sidearmBody = new THREE.BoxGeometry(.055, .064, .2)
 const sidearmGrip = new THREE.BoxGeometry(.049, .095, .057)
-const officerTint = 0x6d839e
 const streetTints = [0xd68569, 0xaac082, 0xdfa65f, 0x9481b0]
 
 // Only the role-specific actors share these accessory shapes. The original
@@ -22,10 +21,10 @@ function dress(p) {
   const tinted = new Map()
   for (const mesh of [...model.near, ...model.far]) {
     const base = mesh.material
-    if (!base.name.endsWith('body')) continue
+    if (officer || !base.name.endsWith('body')) continue
     if (!tinted.has(base)) {
       const copy = base.clone()
-      copy.color.multiply(new THREE.Color(officer ? officerTint : streetTints[p.slot]))
+      copy.color.multiply(new THREE.Color(streetTints[p.slot]))
       tinted.set(base, copy)
     }
     mesh.material = tinted.get(base)

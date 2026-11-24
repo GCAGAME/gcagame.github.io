@@ -114,6 +114,22 @@ step(.8)
 assert.equal(sim.player.health, 0)
 sim.respawn()
 
+// A parked car and a thin fence can each block the driver door even with
+// a clear patch of ground on the other side. Use an empty test street here.
+placePlayerCar(350,95,0)
+const officer = sim.npcs[0], marks = sim.vehicleArrestMarks(officer)
+assert(marks)
+const obstruction = sim.cars[1], parked = {x:obstruction.x,z:obstruction.z,yaw:obstruction.yaw}
+assert(sim.parkCar(obstruction,{x: marks.door.x-.5, z: marks.door.z, yaw: 0}))
+assert.equal(sim.vehicleArrestMarks(officer),null)
+assert(sim.parkCar(obstruction,parked))
+const blockedBefore = world.blocked
+world.blocked = x => Math.abs(x - (marks.door.x + .46)) < .19
+assert.equal(sim.vehicleArrestMarks(officer),null)
+world.blocked = blockedBefore
+assert(sim.vehicleArrestMarks(officer))
+sim.respawn()
+
 // Holding the accelerator on a centred vehicle well before contact can
 // report a ram. Coasting into the same vehicle still causes collision damage.
 function ram(throttle) {

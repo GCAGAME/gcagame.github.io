@@ -203,6 +203,11 @@ export function createAudio() {
       burst(0.085, 1600, 0.29)
       tone(132, 60, 0.09, 0.13, 'triangle')
     },
+    cuff: () => {
+      burst(.035, 4300, .12, 'highpass')
+      tone(1480, 910, .055, .065, 'triangle')
+      burst(.021, 3200, .065, 'bandpass', .055)
+    },
     reload: () => {
       burst(0.05, 2100, 0.1, 'bandpass')
       burst(0.07, 1300, 0.13, 'bandpass', 0.25)

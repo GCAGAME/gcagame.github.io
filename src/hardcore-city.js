@@ -492,6 +492,14 @@ export function createHardcoreCity(scene, world, sim, hooks = {}) {
     if (sight && distance(p, target) <= reach) {
       p.goal = null
       p.speedAI = 0
+      if (target === player && sim.vehicle && !movingCar && sim.vehicleArrestMarks) {
+        const marks = sim.vehicleArrestMarks(p)
+        if (marks && distance(p,marks.guard) > .28) {
+          p.goal = marks.guard
+          p.speedAI = 2.65
+          return
+        }
+      }
       p.yaw = Math.atan2(p.x - target.x, p.z - target.z)
     } else if (!sight && gap < 8) {
       const sweep = Math.floor((clock - file.lastSeen) / 3.2) * 1.9 + p.slot * 2.1
@@ -559,8 +567,10 @@ export function createHardcoreCity(scene, world, sim, hooks = {}) {
     const touching = (!sim.vehicle || Math.abs(sim.vehicle.speed) < 1.4) &&
       officers.find(p => p.file === file && !p.inVehicle && !p.inactive && p.speedAI === 0 &&
         distance(p, player) <= reach && Math.abs(p.y - player.y) < 1.8 && canSee(p, player, reach, false))
-    arrest = Math.max(0, Math.min(1, arrest + dt * (touching ? .55 : -1.1)))
-    if (arrest >= 1) { clearWanted(); hooks.onArrest?.(touching) }
+    const marks = touching && sim.vehicle && sim.vehicleArrestMarks?.(touching)
+    const canArrest = touching && (!sim.vehicle || !sim.vehicleArrestMarks || (marks && distance(touching,marks.guard) <= .32))
+    arrest = Math.max(0, Math.min(1, arrest + dt * (canArrest ? .55 : -1.1)))
+    if (arrest >= 1) { clearWanted(); hooks.onArrest?.(touching,marks) }
   }
   function serialize() {
     if (!enabled) return null

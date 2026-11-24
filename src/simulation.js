@@ -1,5 +1,6 @@
+import { worldHitFraction } from './hardcore-sight.js'
 import { createArrestCinematic } from './arrest-cinematic.js'
-import { walk, presentPedestrian } from './hardcore-pedestrians.js'
+import { canStand, walk, presentPedestrian } from './hardcore-pedestrians.js'
 import { clearance, limitX, limitZ, carMargins } from './boundary.js'
 import { boxHull, circleHits, sweepHull } from './collision.js'
 import * as THREE from 'three'
@@ -402,6 +403,7 @@ export function createSimulation(scene, camera, world) {
         clock: index * 1.1,
         shift: index === 3 ? [7.4, 16.6] : index === 4 ? [10.2, 18.3] : null,
       }
+    model.patrolUniform = role === 'police'
     scene.add(model.group)
     npcs.push(p)
     return p
@@ -616,57 +618,167 @@ export function createSimulation(scene, camera, world) {
     if (snapping || t < 1) camera.position.copy(temp)
     else camera.position.lerp(temp, 1 - Math.exp(-14 * dt))
   }
-  let custody, shotFacing, shotCruiser, shotTime
-  function endArrestShot() {
-    custody?.end()
-    shotCruiser = null
-  }
-  function arrestShot(officer, t, dt) {
-    if (t === 0) {
-      custody ||= createArrestCinematic(scene)
-      shotTime = 0
-      if (current) {
-        if (transfer?.mode === 'enter') {
-          current.model.setDoorOpen?.(0)
-          transfer = null
+  let custody, arrestTake
+  const arrestActors = { player, cars, traffic, npcs, patrolCars, get vehicle() { return current } }
+
+  // Reserve a clear landing by the working door and room for the officer.
+  // If the car is pinned against a wall, pursuit continues until there is room.
+  function vehicleArrestMarks(officer) {
+    if (!current) return null
+    const car = current, cs = Math.cos(car.yaw), sn = Math.sin(car.yaw)
+    function mark(side, along) {
+      const x = car.x + side*cs + along*sn, z = car.z - side*sn + along*cs
+      return { x, z, y: floor(x,z) }
+    }
+    for (const offset of [0, .35, -.35]) {
+      const side = -car.spec.width/2 - .96, along = car.model.cabin.z + offset
+      const door = mark(side, along)
+      if (!canStand(world, arrestActors, officer, door.x, door.z) || Math.abs(door.y-car.y) > .55) continue
+      // A clear landing beyond a fence or another bumper is still inaccessible.
+      const sill = mark(-car.spec.width/2, along)
+      let clear = true
+      for (const fraction of [.25,.5,.75]) {
+        const x = lerp(sill.x,door.x,fraction), z = lerp(sill.z,door.z,fraction)
+        if (world.blocked(x,z,.23,car.y+.25,car.y+1.72) ||
+            vehicleGroups.some(group => group.some(v => v !== car && v.active &&
+              Math.abs(v.y-car.y) < 1.6 && footprintDistance(x,z,v) < .22))) {
+          clear = false
+          break
         }
-        enterExit()
       }
-      shotFacing = Math.atan2(officer.x - player.x, officer.z - player.z)
-      shotCruiser = patrolCars.filter(c => c.active && !c.taken && distance(c,player)<24)
+      if (!clear) continue
+      for (const direction of [1,-1]) {
+        const guard = mark(side-.42, along+direction*1.04)
+        if (canStand(world, arrestActors, officer, guard.x, guard.z) && Math.abs(guard.y-door.y) < .35)
+          return {door, guard}
+      }
+    }
+    return null
+  }
+  function endArrestShot() {
+    if (!arrestTake) return
+    custody.end()
+    if (transfer?.mode === 'exit') {
+      transfer.car.model.setDoorOpen(0)
+      transfer = null
+    }
+    camera.fov = arrestTake.fov
+    camera.updateProjectionMatrix()
+    arrestTake = null
+  }
+  function filmShot(name, focus, pan, range, height, fov, dt) {
+    const cut = arrestTake.lens !== name
+    arrestTake.lens = name
+    targetCam.copy(focus)
+    desiredCam.set(focus.x+Math.sin(pan)*range, focus.y+height, focus.z+Math.cos(pan)*range)
+    chase(targetCam, desiredCam, cut ? 1 : dt)
+    camera.lookAt(targetCam)
+    if (camera.fov !== fov) { camera.fov = fov; camera.updateProjectionMatrix() }
+  }
+  function arrestCameraSide(door, facing, car) {
+    const from = new THREE.Vector3(door.x, floor(door.x,door.z)+1.05, door.z)
+    const clearance = side => {
+      const pan = facing + side*1.2
+      const dest = from.clone().add(new THREE.Vector3(3*Math.sin(pan),.72,3*Math.cos(pan)))
+      let fraction = worldHitFraction(world,from,dest)
+      for (let i = 1; i < 14*fraction; i++) {
+        const k = i/14, x = lerp(from.x,dest.x,k), z = lerp(from.z,dest.z,k)
+        if (vehicleGroups.some(group => group.some(v => v.active && v.y + v.spec.roof >= from.y &&
+            Math.abs(v.x-x)<4 && Math.abs(v.z-z)<4 && footprintDistance(x,z,v)<.18))) {
+          fraction = k
+          break
+        }
+      }
+      return fraction
+    }
+    const preferred = car && Math.cos(facing-car.yaw) > 0 ? -1 : 1
+    return clearance(preferred) + .035 >= clearance(-preferred) ? preferred : -preferred
+  }
+  function arrestShot(officer, t, dt, marks, sound) {
+    if (!arrestTake) {
+      custody ||= createArrestCinematic(scene)
+      const car = current || transfer?.car
+      const door = marks?.door || (transfer?.mode === 'exit' ? transfer : player)
+      const facing = Math.atan2(officer.x-door.x, officer.z-door.z)
+      const cruiser = patrolCars.filter(c => c.active && !c.taken && distance(c,player)<24)
         .sort((a,b) => distance(a,player)-distance(b,player))[0]
+      arrestTake = { car, door: {x:door.x,z:door.z}, facing, cruiser, fov: camera.fov,
+        side: arrestCameraSide(door,facing,car), initialYaw: car?.yaw ?? player.yaw, clock: 0, exited: !current, lastLock: 0, lens: null }
+      if (current) {
+        current.speed = 0
+        current.model.setDoorOpen(0)
+        current.model.showCockpit(false,current)
+        transfer = null
+      }
+      custody.end()
     }
-    custody.restorePose()
-    const elapsedShot = Math.max(0,t-shotTime)
-    shotTime = t
+    const take = arrestTake, car = take.car
     avatar.group.visible = true
-    if (transfer?.mode === 'exit') presentDriver(elapsedShot)
-    else if (current) {
-      avatar.group.scale.setScalar(driverSeat(current, avatar))
-      avatar.group.position.copy(seatAnchor)
-      avatar.group.quaternion.copy(current.model.group.quaternion)
-      current.model.showCockpit(false, current)
-      posePerson(avatar, dt, 0, { driver: true })
-    } else {
-      avatar.group.scale.setScalar(1)
-      avatar.group.position.set(player.x,player.y,player.z)
-      avatar.group.rotation.set(0,shotFacing,0)
+    custody.restorePose()
+    // A streamed first-person rig may only begin loading when this shot starts.
+    if (avatar.ready && officer.model.ready) take.clock += dt
+    else if (t > 4 && (avatar.loadFailed || officer.model.loadFailed)) return true
+    const time = take.clock, facing = take.facing
+    const exitAt = .85, groundAt = car ? 2.6 : 0
+    const beat = time-groundAt
+    if (car && beat < 0) {
+      if (time >= exitAt && !take.exited) {
+        leaveCar(car,take.door)
+        take.exited = true
+        sound?.('door')
+      }
+      if (transfer?.mode === 'exit') presentDriver(dt)
+      else if (current) {
+        avatar.group.scale.setScalar(driverSeat(car,avatar))
+        avatar.group.position.copy(seatAnchor)
+        avatar.group.quaternion.copy(car.model.group.quaternion)
+        posePerson(avatar,dt,0,{driver:true})
+      } else {
+        avatar.group.scale.setScalar(1)
+        avatar.group.position.set(player.x,player.y,player.z)
+        avatar.group.rotation.set(0,car.yaw,0)
+        posePerson(avatar,dt,0,{look:true})
+      }
+      presentPedestrian(officer,player,dt,0)
+      custody.light(take.cruiser, avatar.group.position, facing, time)
+      const reveal = THREE.MathUtils.smoothstep(time,.45,2.25)
+      const focus = targetCam.set(lerp(car.x,take.door.x,.36+.52*reveal),
+        car.y+1.00,lerp(car.z,take.door.z,.36+.52*reveal))
+      // Film from the opposite quarter to the officer so their shoulders
+      // never cover the driver as the door swings out.
+      const behindDoor = (officer.x-take.door.x)*Math.sin(car.yaw) +
+        (officer.z-take.door.z)*Math.cos(car.yaw) >= 0
+      const azimuth = car.yaw-Math.PI/2 + (behindDoor ? -1 : 1)*(.46-.22*reveal)
+      filmShot('driver door',focus,azimuth,5.7-1.15*reveal,1.42-.27*reveal,46,dt)
+      return false
     }
-    const sn = Math.sin(shotFacing), cs = Math.cos(shotFacing)
-    const gap = current ? current.spec.width*.5+.45 : .52
-    const goal = {x: player.x+sn*gap, z: player.z+cs*gap}
-    const stride = t > .18 ? walk(world,{player,vehicle:current,cars,traffic,patrolCars,npcs},officer,goal,2.45,elapsedShot) : 0
+
+    const turn = THREE.MathUtils.smoothstep(beat,0,1)
+    avatar.group.scale.setScalar(1)
+    avatar.group.position.set(player.x,player.y,player.z)
+    avatar.group.rotation.set(0,take.initialYaw + angle(facing-take.initialYaw)*turn,0)
+    const goal = {x:player.x+Math.sin(facing)*.54,z:player.z+Math.cos(facing)*.54}
+    const stride = beat > .22 ? walk(world,arrestActors,officer,goal,2.1,dt) : 0
     officer.yaw = Math.atan2(officer.x-player.x,officer.z-player.z)
     presentPedestrian(officer,player,dt,stride)
-    const wrist = custody.frame(avatar,officer,current,shotCruiser,shotFacing,t,dt,!!transfer)
-    const close = t >= 2.05 && t < 4.15
-    const pan = shotFacing + (close ? .96 : .99) + Math.min(t,5)*.057
-    const dolly = (close ? 1.16 : 3.8) + (current ? .8 : 0)
-    if (close) targetCam.copy(wrist)
-    else targetCam.set((player.x+officer.x)/2,player.y+1.08,(player.z+officer.z)/2)
-    desiredCam.set(targetCam.x+Math.sin(pan)*dolly,targetCam.y + (close ? .28 : .65),targetCam.z+Math.cos(pan)*dolly)
-    chase(targetCam,desiredCam,t<.12 || (close && t-elapsedShot<2.05) ? 1 : dt)
-    camera.lookAt(targetCam)
+    custody.light(take.cruiser, avatar.group.position, facing, time)
+    const wrist = custody.frame(avatar,officer,facing,beat,dt)
+    const locks = Number(beat >= 2.77) + Number(beat >= 3.41)
+    if (locks > take.lastLock) { sound?.('cuff'); take.lastLock = locks }
+
+    const mid = targetCam.set((player.x+officer.x)/2,player.y+1.00,(player.z+officer.z)/2)
+    // Stay on the open side of the door throughout the vehicle sequence.
+    const side = take.side
+    if (beat < 1.88) {
+      filmShot('two shot',mid,facing+side*(1.54+.13*turn),3.85,.47,44,dt)
+    } else if (beat < 4.24) {
+      const push = THREE.MathUtils.smoothstep(beat,1.88,4.24)
+      filmShot('wrists',wrist,facing+side*(1.02+.14*push),1.30-.16*push,.54,37,dt)
+    } else {
+      mid.y = player.y+1.22
+      filmShot('custody',mid,facing+side*1.95,3.15+.16*(beat-4.24),.33,47,dt)
+    }
+    return beat >= 5.4
   }
   function traceCar(c, x, z, yaw, dx = 0, dz = 0, turn = 0, footprint = null, hit = null) {
     const width = c.spec.width,
@@ -1716,6 +1828,27 @@ export function createSimulation(scene, camera, world) {
     }
   }
 
+  function leaveCar(car,spot) {
+    car.speed = 0
+    car.braking = false
+    car.steer = 0
+    car.gear = 'N'
+    if (car.police) car.available = true
+    startTransfer(car, 'exit', spot)
+    current = null
+    Object.assign(player, {
+      ...spot,
+      y: floor(spot.x, spot.z),
+      yaw: car.yaw,
+      pitch: -0.035,
+      grounded: true,
+      speed: 0,
+    })
+    vertical = vx = vz = 0
+    snapping = true
+    avatar.group.visible = !first
+    return { ok: true, entered: false, car, message: 'Left ' + car.name }
+  }
   function enterExit(onDoor = null) {
     if (approachDoor) return { ok: false, message: "Walking to the driver's door." }
     if (transfer)
@@ -1755,25 +1888,7 @@ export function createSimulation(scene, camera, world) {
           car,
           message: 'Move the vehicle to make room beside a door.',
         }
-      car.speed = 0
-      car.braking = false
-      car.steer = 0
-      car.gear = 'N'
-      if (car.police) car.available = true
-      startTransfer(car, 'exit', spot)
-      current = null
-      Object.assign(player, {
-        ...spot,
-        y: floor(spot.x, spot.z),
-        yaw: car.yaw,
-        pitch: -0.035,
-        grounded: true,
-        speed: 0,
-      })
-      vertical = vx = vz = 0
-      snapping = true
-      avatar.group.visible = !first
-      return { ok: true, entered: false, car, message: 'Left ' + car.name }
+      return leaveCar(car,spot)
     }
     const car = nearestCar()
     if (!car)
@@ -2221,7 +2336,7 @@ export function createSimulation(scene, camera, world) {
     patrolCars,
     setHardcore,
     spawnCityPerson: actor,
-    dispatchPatrol, presentOccupant, presentTheftEntry, arrestShot, endArrestShot, driverPath, availableToSteal, stealCar, releaseStolen,
+    dispatchPatrol, presentOccupant, presentTheftEntry, vehicleArrestMarks, arrestShot, endArrestShot, driverPath, availableToSteal, stealCar, releaseStolen,
     ownedCar: c => hooks.isOwned?.(c.id) ?? (c.id === 'sedan'),
     stopPatrol,
     alertTraffic,

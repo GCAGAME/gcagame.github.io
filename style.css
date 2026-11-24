@@ -1485,15 +1485,18 @@ kbd {
 }
 .arrest-caption {
   position: absolute;
-  bottom: 6%;
-  left: 6%;
-  display: grid;
+  bottom: calc(-1 * clamp(28px, 8vh, 82px));
+  height: clamp(28px, 8vh, 82px);
+  left: 4%;
+  display: flex;
+  align-items: center;
+  gap: .8rem;
   color: #fff;
   text-shadow: 0 2px 8px #12171c;
 }
 .arrest-caption span { font-size: .8rem; letter-spacing: .14em; text-transform: uppercase; }
-.arrest-caption strong { font-size: clamp(1.8rem, 4vw, 3.4rem); }
-#arrest-scene button { position: absolute; right: 5%; bottom: 6%; pointer-events: auto; }
+.arrest-caption strong { font-size: clamp(.9rem, 1.5vw, 1.2rem); }
+#arrest-scene button { position: absolute; right: 4%; bottom: calc(-.5 * clamp(28px, 8vh, 82px)); transform: translateY(50%); pointer-events: auto; }
 .legend-pip.police { background: #688eff; transform: rotate(45deg); }
 .legend-pip.suspect { background: #ecad55; }
 
@@ -1502,8 +1505,8 @@ kbd {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: radial-gradient(ellipse at 0% 24%, rgba(74, 110, 255, .24), transparent 42%),
-    radial-gradient(ellipse at 100% 62%, rgba(255, 75, 60, .18), transparent 37%);
+  background: radial-gradient(ellipse at 0% 24%, rgba(74, 110, 255, .12), transparent 42%),
+    radial-gradient(ellipse at 100% 62%, rgba(255, 75, 60, .09), transparent 37%);
   animation: patrol-glow 2.5s ease-in-out infinite alternate;
 }
 @keyframes patrol-glow {

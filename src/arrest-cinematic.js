@@ -16,16 +16,23 @@ function aim(bone, child, target) {
   bone.updateWorldMatrix(false, true)
 }
 function reach(model, side, target, weight, pole) {
+  if (weight <= 0) return
   const shoulder = wrist(model, side, 'UpperArm'), elbow = wrist(model, side, 'Forearm'), hand = wrist(model, side, 'Hand')
   const origin = pos(shoulder), mid = pos(elbow), end = pos(hand)
   const a = mid.distanceTo(origin), b = end.distanceTo(mid)
-  const direction = end.lerp(target, weight).sub(origin)
+  const restShoulder = shoulder.quaternion.clone(), restElbow = elbow.quaternion.clone()
+  const direction = target.clone().sub(origin)
   const d = THREE.MathUtils.clamp(direction.length(), Math.abs(a - b) + .001, a + b - .001)
   direction.normalize()
   const along = (a*a + d*d - b*b) / (2*d)
   const bend = pole.clone().addScaledVector(direction, -pole.dot(direction)).normalize()
   aim(shoulder, elbow, origin.clone().addScaledVector(direction, along).addScaledVector(bend, Math.sqrt(Math.max(0, a*a-along*along))))
   aim(elbow, hand, origin.addScaledVector(direction, d))
+  if (weight < 1) {
+    shoulder.quaternion.slerp(restShoulder,1-weight)
+    elbow.quaternion.slerp(restElbow,1-weight)
+    shoulder.updateWorldMatrix(false,true)
+  }
 }
 
 export function createArrestCinematic(scene) {
@@ -42,7 +49,9 @@ export function createArrestCinematic(scene) {
     jaw.rotation.z = Math.PI
     jaw.position.x = .045
     pivot.add(jaw)
-    mount.add(fixed, pivot)
+    const lock = new THREE.Mesh(new THREE.BoxGeometry(.023,.029,.021),metal)
+    lock.position.x = .044
+    mount.add(fixed, pivot, lock)
     group.add(mount)
     return { mount, pivot }
   })
@@ -51,10 +60,11 @@ export function createArrestCinematic(scene) {
     group.add(mesh)
     return mesh
   })
+  const halo = haloTexture()
   const lights = [0x426fff,0xff4c45].map(color => {
     const lamp = new THREE.PointLight(color, 0, 18)
     const glow = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: haloTexture(), color, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
+      map: halo, color, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
     }))
     glow.scale.setScalar(.9)
     lamp.add(glow)
@@ -66,23 +76,27 @@ export function createArrestCinematic(scene) {
     for (const [bone,q] of corrections) bone.quaternion.copy(q)
     corrections = []
   }
-  function frame(avatar, officer, car, cruiser, facing, t, dt, transferring) {
+  function light(cruiser, center, facing, t) {
     if (!group.parent) scene.add(group)
     const back = v().set(Math.sin(facing),0,Math.cos(facing))
     const right = v().set(Math.cos(facing),0,-Math.sin(facing))
-    const center = avatar.group.position.clone().addScaledVector(back, car ? -.32 : .30)
-    center.y += car ? .89 : .94
-    const at = [0, 1].map(i => center.clone().addScaledVector(right, (i ? 1 : -1)*.09))
     const base = cruiser ? cruiser.model.group.position : center.clone().addScaledVector(back, 4)
     lights.forEach((lamp,i) => {
       const pulse = .5 + .5 * Math.cos(t * 5 + i*Math.PI)
       lamp.position.copy(base).addScaledVector(cruiser ? v().set(Math.cos(cruiser.yaw),0,-Math.sin(cruiser.yaw)) : right, (i ? 1 : -1)*(cruiser ? .25 : 1.5))
-      lamp.position.y += cruiser ? cruiser.spec.roof + .13 : .9
-      lamp.intensity = (cruiser ? 46 : 27) * (.16 + .84*pulse)
+      lamp.position.y += cruiser ? cruiser.spec.roof + .13 : 1.8
+      lamp.intensity = (cruiser ? 35 : 13) * (.24 + .76*pulse)
       lamp.children[0].visible = !!cruiser
       lamp.children[0].material.opacity = .22 + .62*pulse
     })
-    if (!car && !transferring) posePerson(avatar, dt, 0, { look: true })
+  }
+  function frame(avatar, officer, facing, t, dt) {
+    const back = v().set(Math.sin(facing),0,Math.cos(facing))
+    const right = v().set(Math.cos(facing),0,-Math.sin(facing))
+    const center = avatar.group.position.clone().addScaledVector(back,.25)
+    center.y += .99
+    const at = [-1,1].map(sign => center.clone().addScaledVector(right,sign*.083))
+    posePerson(avatar, dt, 0, { look: true })
     if (!avatar.ready || !officer.model.ready) {
       for (const {mount} of rings) mount.visible = false
       for (const link of links) link.visible = false
@@ -105,7 +119,7 @@ export function createArrestCinematic(scene) {
       anchors.push(anchor)
       const lockAt = 2.45 + i*.63
       const copHand = wrist(officer.model,side,'Hand')
-      reach(officer.model, side, anchor, smooth(t,1.35,lockAt)*(1-smooth(t,3.85,4.65)),right.clone().multiplyScalar(sign).setY(-.55))
+      reach(officer.model, side, anchor, smooth(t,1.35,lockAt)*(1-smooth(t,lockAt+.37,lockAt+.84)),right.clone().multiplyScalar(sign).setY(-.55))
       const {mount,pivot} = rings[i]
       mount.visible = t > 1.85 + i*.35
       mount.position.copy(pos(copHand)).lerp(anchor,smooth(t,lockAt-.42,lockAt))
@@ -124,7 +138,13 @@ export function createArrestCinematic(scene) {
     })
     return anchors[0].lerp(anchors[1],.5)
   }
-  return { frame, restorePose, end() { restorePose(); group.removeFromParent() } }
+  function end() {
+    restorePose()
+    for (const {mount} of rings) mount.visible = false
+    for (const link of links) link.visible = false
+    group.removeFromParent()
+  }
+  return { frame, light, restorePose, end }
 }
 
 function haloTexture() {

@@ -416,7 +416,7 @@ function configureMode() {
   const hard = mode === 'hardcore'
   if (hard && !city) {
     city = createHardcoreCity(scene, world, sim, {
-      onArrest: officer => endEncounter('arrest', officer),
+      onArrest: (officer, marks) => endEncounter('arrest', officer, marks),
       damagePlayer: (amount) => {
         if (outcome || sim.player.health <= 0) return
         sim.player.health = Math.max(0, sim.player.health - amount)
@@ -452,7 +452,7 @@ function finishArrestScene() {
   arrestScene = null
   openPanel('recovery')
 }
-function endEncounter(reason, officer) {
+function endEncounter(reason, officer, marks) {
   if (outcome || (mode !== 'hardcore' && reason !== 'crash') || applying || screen !== 'hud') return
   outcome = reason === 'crash' ? 'crash' : sim.player.health <= 0 ? 'down' : reason
   arms?.resetAction()
@@ -462,7 +462,7 @@ function endEncounter(reason, officer) {
     unlock()
     audio.setActive(false)
     arrestScene = { officer, elapsed: 0 }
-    sim.arrestShot(officer, 0, 0)
+    sim.arrestShot(officer, 0, 0, marks)
     ui.cinematic()
   } else openPanel('recovery')
   saveGame(false)
@@ -981,10 +981,10 @@ function frame(now) {
     const step = Math.max(0, Math.min(.16, (now - previousFrame) / 1000))
     arrestScene.elapsed += step
     const t = arrestScene.elapsed
-    sim.arrestShot(arrestScene.officer, t, step)
+    const complete = sim.arrestShot(arrestScene.officer,t,step,null,audio.play)
     graphics.render(settings, false, 0, 0, climate.state.wet)
     previousFrame = now
-    if (t >= 5.35) finishArrestScene()
+    if (complete) finishArrestScene()
     return
   }
   if (screen !== 'hud' || !active) {

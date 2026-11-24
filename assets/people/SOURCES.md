@@ -12,3 +12,5 @@ The four civilian adults and their skeletal motion are adapted from the Microsof
 Adaptations include FBX-to-glTF conversion, an indexed lower-detail mesh, resampled motion tracks, WebP color and normal maps, roughness derived from the original specular textures, and foot cadence derived from the source's travel distance. All four GLBs contain both geometry levels and their own animation set. The character loader streams the first required instance of each style, then shares textures and geometry across additional residents.
 
 The motion takes use the male and female versions of idle_neutral_01, idle_look_around_01, walk_neutral_01, run_neutral_01, crouch_idle, sit_chair_idle_neutral_01, sit_down_chair_left, sit_stand_up_chair_left, turn_left_90 and turn_right_90. Vehicle transfers adapt the library's chair motion to the driver's seat. Face and finger geometry is included, with body motion and hand animation. Dialogue currently uses text.
+
+The four patrol WebP maps use the corresponding Rocketbox body UVs. Their uniform panels are recolored from the original cloth, retaining seam detail and the original skin, normal and roughness maps.

@@ -4,6 +4,7 @@ import { clone as cloneCharacter } from '../vendor/SkeletonUtils.js'
 
 const wardrobe = ['trail-jacket', 'rose-shirt', 'denim-jacket', 'linen-shirt']
 const library = new Map()
+const uniforms = new Map()
 const drivingPoses = new WeakMap()
 const loader = new GLTFLoader()
 
@@ -67,7 +68,22 @@ function loadResident(model) {
     const path = './assets/people/' + model.style + '.glb'
     library.set(model.style, loader.loadAsync(path))
   }
-  return library.get(model.style).then((asset) => {
+  if (model.patrolUniform && !uniforms.has(model.style)) {
+    const texture = new THREE.TextureLoader().loadAsync('./assets/people/patrol-' + model.style + '.webp')
+      .then(map => {
+        map.colorSpace = THREE.SRGBColorSpace
+        map.flipY = false
+        map.name = model.style + ' patrol uniform'
+        return map
+      })
+      .catch(() => {
+        // The original GLB already contains a complete textured body.
+        uniforms.delete(model.style)
+        return null
+      })
+    uniforms.set(model.style, texture)
+  }
+  return Promise.all([library.get(model.style), model.patrolUniform && uniforms.get(model.style)]).then(([asset, uniform]) => {
     const character = cloneCharacter(asset.scene)
     if (model.canDrive) {
       if (!drivingPoses.has(asset)) {
@@ -88,7 +104,10 @@ function loadResident(model) {
       object.receiveShadow = true
       // Local deformation envelope covers all authored human poses in metres.
       object.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0.9, 0), 1.5)
-      if (!model.npc && object.material.name.endsWith('body')) {
+      if (uniform && object.material.name.endsWith('body')) {
+        object.material = object.material.clone()
+        object.material.map = uniform
+      } else if (!model.npc && object.material.name.endsWith('body')) {
         object.material = object.material.clone()
         object.material.color.set(model.tint)
         model.clothes.push(object.material)
@@ -155,9 +174,10 @@ export function posePerson(model, dt, speed, state = {}) {
     model.pendingPose = state
     model.pendingSpeed = speed
     if (!model.loading && typeof document !== 'undefined')
-      model.loading = loadResident(model).catch((error) =>
-        console.error('Character asset:', model.style, error),
-      )
+      model.loading = loadResident(model).catch(error => {
+        model.loadFailed = true
+        console.error('Character asset:', model.style, error)
+      })
     return
   }
   const pivot = Math.abs(state.turn || 0) > 0.85 && speed < 0.45
