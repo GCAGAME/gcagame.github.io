@@ -4,6 +4,7 @@ import { clone as cloneCharacter } from '../vendor/SkeletonUtils.js'
 
 const wardrobe = ['trail-jacket', 'rose-shirt', 'denim-jacket', 'linen-shirt']
 const library = new Map()
+const drivingPoses = new WeakMap()
 const loader = new GLTFLoader()
 
 // Three updates every descendant's world matrix during the scene traversal,
@@ -15,7 +16,7 @@ class CharacterGroup extends THREE.Group {
 }
 
 // Adapt the shipped seated pose to pedals and wheel in the rig's local forward (+Z).
-// Bake once when the player's rig loads; normal driving only samples the resulting clip.
+// Bake once per character asset. Each driver plays the clip on their own skeleton.
 function driverPose(character, seatClip) {
   const mixer = new THREE.AnimationMixer(character)
   mixer.clipAction(seatClip).play()
@@ -68,9 +69,12 @@ function loadResident(model) {
   }
   return library.get(model.style).then((asset) => {
     const character = cloneCharacter(asset.scene)
-    if (!model.npc) {
-      const seat = asset.animations.find((clip) => clip.name === 'seat')
-      model.driverPose = driverPose(character, seat)
+    if (model.canDrive) {
+      if (!drivingPoses.has(asset)) {
+        const seat = asset.animations.find((clip) => clip.name === 'seat')
+        drivingPoses.set(asset, driverPose(character, seat))
+      }
+      model.driverPose = drivingPoses.get(asset)
     }
     character.rotation.y = Math.PI
     model.character = character
@@ -104,11 +108,12 @@ function loadResident(model) {
   })
 }
 
-export function makePerson(index = 0, npc = false) {
+export function makePerson(index = 0, npc = false, canDrive = !npc) {
   const model = {
     group: new CharacterGroup(),
     index,
     npc,
+    canDrive,
     style: wardrobe[index % wardrobe.length],
     near: [],
     far: [],

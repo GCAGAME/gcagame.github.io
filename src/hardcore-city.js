@@ -260,6 +260,10 @@ export function createHardcoreCity(scene, world, sim, hooks = {}) {
   }
   function cancelTheft(p) {
     if (p.theft?.opening && sim.availableToSteal(p.theft.car)) p.theft.car.model.setDoorOpen?.(0)
+    if (p.theft?.opening && !p.inVehicle) {
+      p.model.group.scale.setScalar(1)
+      p.model.group.rotation.set(0, p.yaw, 0)
+    }
     p.theft = null
   }
   function pickTheft(p) {
@@ -285,10 +289,9 @@ export function createHardcoreCity(scene, world, sim, hooks = {}) {
     p.yaw = Math.atan2(p.x - car.x, p.z - car.z)
     if (!t.opening) {
       t.opening = true
-      t.enterAt = clock + 1.15
-      car.model.setDoorOpen?.(.85)
+      t.startedAt = clock
       if (distance(p, player) < 22 && sim.ownedCar(car)) hooks.notify?.(p.name + ' is opening your ' + car.name)
-    } else if (clock >= t.enterAt) {
+    } else if (clock - t.startedAt >= 1.25) {
       const destination = { x: 0, z: car.z > -60 ? -80 : 60 }
       if (sim.stealCar(car, p, destination)) {
         reportCrime('theft', p, p, player)
@@ -530,6 +533,13 @@ export function createHardcoreCity(scene, world, sim, hooks = {}) {
         if (sim.presentOccupant) sim.presentOccupant(p, dt)
         else p.model.group.visible = false
         continue
+      }
+      if (p.theft?.opening) {
+        if (sim.availableToSteal(p.theft.car)) {
+          sim.presentTheftEntry(p, p.theft.car, Math.min(1, (clock - p.theft.startedAt) / 1.25), dt)
+          continue
+        }
+        cancelTheft(p)
       }
       p.aiStep = (p.aiStep || 0) + dt
       const d = distance(p, player)

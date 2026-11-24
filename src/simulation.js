@@ -378,7 +378,7 @@ export function createSimulation(scene, camera, world) {
   ]
   const depot = world.locations.depot
   const actor = (index, x, z, role, path = null) => {
-    const model = makePerson(index + 1, true),
+    const model = makePerson(index + 1, true, role === 'reckless-pedestrian' || role === 'police'),
       p = {
         x,
         z,
@@ -1579,10 +1579,10 @@ export function createSimulation(scene, camera, world) {
   function presentDriver(dt) {
     const car = current || transfer?.car
     if (!car) return
-    const body = car.model.group, scale = driverSeat(car, avatar)
     avatar.group.visible = transfer ? true : !driverView
     if (!transfer) {
-      avatar.group.quaternion.copy(body.quaternion)
+      const scale = driverSeat(car, avatar)
+      avatar.group.quaternion.copy(car.model.group.quaternion)
       avatar.group.scale.setScalar(scale)
       avatar.group.position.copy(seatAnchor)
       posePerson(avatar, dt, 0, { driver: true })
@@ -1590,14 +1590,19 @@ export function createSimulation(scene, camera, world) {
     }
     transfer.elapsed += dt
     const progress = Math.min(1, transfer.elapsed / 1.25)
+    presentTransfer(avatar, car, transfer.mode, transfer, progress, dt)
+    if (progress === 1) transfer = null
+  }
+
+  function presentTransfer(model, car, mode, exterior, progress, dt) {
+    const body = car.model.group, scale = driverSeat(car, model)
     const throughDoor = THREE.MathUtils.smoothstep(progress, 0.2, 0.84)
-    const sitting = transfer.mode === 'enter' ? throughDoor : 1 - throughDoor
-    const exterior = transfer
+    const sitting = mode === 'enter' ? throughDoor : 1 - throughDoor
     const { x, y, z } = seatAnchor
-    avatar.group.rotation.set(0, car.yaw, 0)
-    avatar.group.quaternion.slerp(body.quaternion, sitting)
-    avatar.group.scale.setScalar(lerp(1, scale, sitting))
-    avatar.group.position.set(
+    model.group.rotation.set(0, car.yaw, 0)
+    model.group.quaternion.slerp(body.quaternion, sitting)
+    model.group.scale.setScalar(lerp(1, scale, sitting))
+    model.group.position.set(
       lerp(exterior.x, x, sitting),
       lerp(exterior.y, y, sitting),
       lerp(exterior.z, z, sitting),
@@ -1607,12 +1612,15 @@ export function createSimulation(scene, camera, world) {
       (1 - THREE.MathUtils.smoothstep(progress, 0.76, 1))
     car.model.setDoorOpen?.(openness)
     posePerson(
-      avatar,
+      model,
       dt,
       0,
-      sitting >= 0.98 ? { driver: true } : { transfer: transfer.mode, progress },
+      sitting >= 0.98 ? { driver: true } : { transfer: mode, progress },
     )
-    if (progress === 1) transfer = null
+  }
+  function presentTheftEntry(p, car, progress, dt) {
+    p.model.group.visible = distance(p, player) < 75
+    presentTransfer(p.model, car, 'enter', p, progress, dt)
   }
 
   // Test short footpaths on both sides of the bumpers before committing to a walk.
@@ -2175,7 +2183,7 @@ export function createSimulation(scene, camera, world) {
     patrolCars,
     setHardcore,
     spawnCityPerson: actor,
-    dispatchPatrol, presentOccupant, arrestShot, driverPath, availableToSteal, stealCar, releaseStolen,
+    dispatchPatrol, presentOccupant, presentTheftEntry, arrestShot, driverPath, availableToSteal, stealCar, releaseStolen,
     ownedCar: c => hooks.isOwned?.(c.id) ?? (c.id === 'sedan'),
     stopPatrol,
     alertTraffic,

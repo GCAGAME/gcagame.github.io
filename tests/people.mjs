@@ -198,6 +198,34 @@ assert.equal(
   sim.npcs.filter((p) => p.role === 'race-steward' || p.role === 'delivery-coordinator').length,
   2,
 )
+// Use the actual thief rigs and cabin placement, including first visibility
+// after a saved trip resumes. Both levels of detail use the same skeleton.
+for (let slot = 0; slot < 4; slot++) {
+  const thief = sim.spawnCityPerson(24 + slot, 0, 0, 'reckless-pedestrian')
+  const car = sim.cars[0]
+  Object.assign(thief, { x: car.x, z: car.z, ride: car })
+  sim.presentOccupant(thief, 1 / 60)
+  await thief.model.loading
+  assert(thief.model.ready)
+  assert.equal(thief.model.active, thief.model.actions.driver)
+  sim.presentTheftEntry(thief, car, .45, 1 / 60)
+  assert.equal(thief.model.active.getClip().name, 'enter')
+  for (let i = 0; i < 24; i++) sim.presentOccupant(thief, 1 / 60)
+  scene.updateMatrixWorld(true)
+  const model = thief.model
+  assert.equal(model.active.getClip().name, 'driver')
+  if (model.style === avatar.style) assert.equal(model.active.getClip(), avatar.actions.driver.getClip())
+  const local = car.model.group.matrixWorld.clone().invert()
+  const joint = (name) => model.character.getObjectByName('Bip01_' + name)
+    .getWorldPosition(new THREE.Vector3()).applyMatrix4(local)
+  for (const side of ['L_', 'R_']) {
+    assert(joint(side + 'Thigh').z - joint(side + 'Calf').z > .18)
+    assert(joint(side + 'UpperArm').z - joint(side + 'Hand').z > .18)
+  }
+  scene.remove(model.group)
+  sim.npcs.splice(sim.npcs.indexOf(thief), 1)
+}
+console.log('PASS all four thief rigs play player entry and seated driving clips with bent legs and hands forward.')
 const car = sim.cars[0],
   c = Math.cos(car.yaw),
   s = Math.sin(car.yaw)
