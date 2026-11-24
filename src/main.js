@@ -438,7 +438,7 @@ function configureMode() {
       (id === 'sports' && story.state.owned.includes('ownership')) ||
       (id === 'offroad' && story.state.chapter === 2),
     onCrime: (kind, actor, x, z) => city.reportCrime(kind === 'recklessDriving' ? 'reckless' : kind, actor, { x, z, y: actor.y }),
-    onDriverInjury: hp => info('Crash injury Â· âˆ’' + hp + ' HP'),
+    onDriverInjury: hp => info('Crash injury: -' + hp + ' HP'),
     onCrash: event => city.alertDanger(event, Math.min(25, 5 + event.closingSpeed)),
     onPedestrianImpact: (npc, damage) => city.damageNpc(npc, damage, sim.player),
   })
