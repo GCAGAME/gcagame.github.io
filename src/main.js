@@ -102,7 +102,7 @@ const prefix = 'projectReality.briar.v1.',
   settingsKey = prefix + 'settings'
 let mode = read(prefix + 'mode') === 'hardcore' ? 'hardcore' : 'normal'
 const slot = (kind, forMode = mode) => prefix + (forMode === 'hardcore' ? 'hardcore.' : '') + kind
-let city, arms, outcome = null, lastPadFire = false
+let arrestScene, city, arms, outcome = null, lastPadFire = false
 const numbers = {
   resolution: [0.5, 1.5],
   renderDistance: [120, 800],
@@ -188,7 +188,7 @@ const keys = new Set(),
 const ui = createUI({
   newGame: startNew,
   selectMode,
-  recover,
+  recover, finishArrestScene,
   outfit: (id, ammo) => {
     if (screen === 'outfitters') arms.purchase(id, ammo)
   },
@@ -285,6 +285,7 @@ function payload() {
     mode,
     combat: mode === 'hardcore' ? { ...arms.hud(), wanted: city.wanted, status: city.status, arrest: city.arrestProgress } : null,
     outfitters: screen === 'outfitters' ? arms.shop() : null,
+    mapActors: mode === 'hardcore' ? city.mapActors() : [],
     shops: mode === 'hardcore' ? outfitters : [],
     outcome,
     player: p,
@@ -415,7 +416,7 @@ function configureMode() {
   const hard = mode === 'hardcore'
   if (hard && !city) {
     city = createHardcoreCity(scene, world, sim, {
-      onArrest: () => endEncounter('arrest'),
+      onArrest: officer => endEncounter('arrest', officer),
       damagePlayer: (amount) => {
         if (outcome || sim.player.health <= 0) return
         sim.player.health = Math.max(0, sim.player.health - amount)
@@ -444,11 +445,24 @@ function configureMode() {
   arms?.setVisible(hard)
   outcome = null
 }
-function endEncounter(reason) {
+function finishArrestScene() {
+  if (screen !== 'arrestScene') return
+  arrestScene = null
+  openPanel('recovery')
+}
+function endEncounter(reason, officer) {
   if (outcome || mode !== 'hardcore' || applying || screen !== 'hud') return
   outcome = sim.player.health <= 0 ? 'down' : reason
   arms.resetAction()
-  openPanel('recovery')
+  if (outcome === 'arrest' && officer) {
+    screen = 'arrestScene'
+    clearInput()
+    unlock()
+    audio.setActive(false)
+    arrestScene = { officer, start: performance.now() }
+    sim.arrestShot(officer, 0, 0)
+    ui.cinematic()
+  } else openPanel('recovery')
   saveGame(false)
 }
 function recover() {
@@ -773,6 +787,11 @@ function onKey(e, down) {
     if (!down) keys.delete(e.code)
     return
   }
+  if (screen === 'arrestScene' && ['Escape', 'Space', 'Enter'].includes(e.code) && !e.repeat) {
+    e.preventDefault()
+    finishArrestScene()
+    return
+  }
   if (screen !== 'hud') {
     if (e.code === 'Escape' && !e.repeat && screen !== 'menu' && screen !== 'loading') {
       e.preventDefault()
@@ -942,11 +961,20 @@ function frame(now) {
   const previousScreen = screen
   const pad = gamepad.poll(ready && !document.hidden && document.hasFocus(), code => {
     if (screen !== previousScreen) return
-    if (screen === 'hud') pressAction(code)
+    if (screen === 'arrestScene' && ['Confirm', 'Escape'].includes(code)) finishArrestScene()
+    else if (screen === 'hud') pressAction(code)
     else if (code === 'Escape' || (screen === 'map' && code === 'KeyM'))
       closePanel()
     else ui.menuInput(code)
   }, previousScreen !== 'hud', now, mode === 'hardcore' && !sim?.vehicle)
+  if (screen === 'arrestScene' && arrestScene) {
+    const t = (now - arrestScene.start) / 1000
+    sim.arrestShot(arrestScene.officer, t, Math.min(.1, (now - previousFrame) / 1000))
+    graphics.render(settings, false, 0, 0, climate.state.wet)
+    previousFrame = now
+    if (t >= 3.4) finishArrestScene()
+    return
+  }
   if (screen !== 'hud' || !active) {
     previousFrame = now
     lastRender = 0

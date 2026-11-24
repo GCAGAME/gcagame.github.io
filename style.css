@@ -1478,3 +1478,21 @@ kbd {
   text-align: center;
   pointer-events: none;
 }
+
+#arrest-scene {
+  pointer-events: none;
+  border-block: clamp(28px, 8vh, 82px) solid #101315;
+}
+.arrest-caption {
+  position: absolute;
+  bottom: 6%;
+  left: 6%;
+  display: grid;
+  color: #fff;
+  text-shadow: 0 2px 8px #12171c;
+}
+.arrest-caption span { font-size: .8rem; letter-spacing: .14em; text-transform: uppercase; }
+.arrest-caption strong { font-size: clamp(1.8rem, 4vw, 3.4rem); }
+#arrest-scene button { position: absolute; right: 5%; bottom: 6%; pointer-events: auto; }
+.legend-pip.police { background: #688eff; transform: rotate(45deg); }
+.legend-pip.suspect { background: #ecad55; }

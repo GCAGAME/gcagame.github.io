@@ -52,8 +52,8 @@ with sync_playwright() as pw:
     start()
     assert ev("briar.hardcore.arms.hud().loaded === 8 && briar.sim.player.health === 100")
     assert ev("briar.sim.npcs.filter(n=>n.role==='reckless-pedestrian' && !n.inactive).length===4")
-    assert ev("briar.sim.traffic.filter(c=>c.reckless).length===1 && !briar.settings().bloodEffects")
-    print('PASS mode slots, starter, four active reckless pedestrians and one reckless driver', flush=True)
+    assert ev("briar.sim.traffic.filter(c=>c.reckless).length<=1 && !briar.settings().bloodEffects")
+    print('PASS mode slots, starter, four active reckless pedestrians and capped civilian traffic', flush=True)
 
     # Set up encounters in the actual county. Inputs, collisions, transactions and
     # persistence below run through the same systems used in the live game.
@@ -72,6 +72,18 @@ with sync_playwright() as pw:
     page.wait_for_function('briar.hardcore.arms.hud().loaded === 8')
     assert ev('briar.hardcore.arms.hud().reserve === 15')
     page.keyboard.press('m')
+    assert 'Police' in page.locator('.map-legend').inner_text()
+    assert 'Reckless pedestrian' in page.locator('.map-legend').inner_text()
+    assert ev("""() => {
+      const ctx = document.getElementById('full-map').getContext('2d')
+      const pixels = ctx.getImageData(0,0,ctx.canvas.width,ctx.canvas.height).data
+      let police = false, street = false
+      for (let i=0; i<pixels.length; i+=4) {
+        police ||= pixels[i]===104 && pixels[i+1]===142 && pixels[i+2]===255
+        street ||= pixels[i]===236 && pixels[i+1]===173 && pixels[i+2]===85
+      }
+      return police && street
+    }""")
     click('[data-shop-route="1"]')
     assert ev("briar.save() && JSON.parse(localStorage.getItem('projectReality.briar.v1.hardcore.auto')).waypoint.z < -240")
     for x, z in [(24.1, -96.6), (7, -246.4)]:
@@ -148,6 +160,10 @@ with sync_playwright() as pw:
       if (!city.wanted) throw Error('Officer failed to witness theft')
       for(let i=0;i<200 && briar.screen()==='hud';i++) city.update(1/60)
     }""")
+    screen('arrestScene')
+    assert page.locator('#arrest-scene').is_visible()
+    camera_start = ev('briar.camera.position.toArray()')
+    page.wait_for_function('start => briar.camera.position.toArray().some((v,i)=>Math.abs(v-start[i])>.02)', arg=camera_start)
     screen('recovery')
     assert page.locator('#sheet-title').text_content() == 'Under arrest'
     page.keyboard.press('Escape')

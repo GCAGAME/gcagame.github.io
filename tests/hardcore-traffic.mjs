@@ -31,6 +31,7 @@ const sim = createSimulation(new THREE.Scene(), camera, world)
 const crimes = [], crashes = []
 const owned = new Set(['sedan'])
 const hooks = {
+  spawnRandom: () => .1,
   isOwned: (id) => owned.has(id),
   onCrime: (...crime) => crimes.push(crime),
   onCrash: (crash) => crashes.push(crash),
@@ -180,7 +181,7 @@ console.log('PASS collision severity, minor impacts, ramming, reckless traffic, 
 // on the generated county's roads with its actual buildings and other cars.
 const countyScene = new THREE.Scene(), county = createWorld(countyScene)
 const live = createSimulation(countyScene, new THREE.PerspectiveCamera(), county)
-live.setHardcore(true)
+live.setHardcore(true, { spawnRandom: () => .1 })
 live.reset()
 const patrol = live.dispatchPatrol(0, { x: 62, z: -78 }, live.patrolCars[0])
 const extra = [live.traffic.find(c => c.reckless), patrol]
@@ -243,3 +244,56 @@ for (let i = 0; i < 42 * 30 && city.wanted; i++) {
 assert(activePursuit && sawSearch && peakGap > 55 && live.player.z < -270 && city.wanted === 0,
   JSON.stringify({ activePursuit, sawSearch, peakGap, z: live.player.z, policeZ: live.patrolCars[0].z, wanted: city.wanted }))
 console.log('PASS sport coupe escaped north past the trailhead under normal driving controls; peak cruiser gap', Math.round(peakGap), 'metres.')
+
+// A normal start at Cedar House should produce an observable theft of the
+// real starter car, followed by an opportunity to recover that same car.
+live.reset()
+city.restore()
+const starter = live.cars[0], home = { x: starter.x, z: starter.z }
+const kit = live.npcs.find(n => n.role === 'reckless-pedestrian' && n.slot === 0)
+let opened = false, boarded = false, maxTravel = 0
+for (let frame = 0; frame < 50 * 30; frame++) {
+  live.update(1 / 30, countyInput)
+  city.update(1 / 30)
+  opened ||= !!kit.theft?.opening
+  if (starter.npcDriver === kit) {
+    if (!boarded) {
+      const driveSave = live.serialize(), streetSave = city.serialize()
+      live.restore(driveSave)
+      city.restore(streetSave)
+      assert.equal(starter.npcDriver, kit)
+      assert.equal(kit.ride, starter)
+      assert.notEqual(live.nearestCar(), starter)
+    }
+    boarded = true
+    maxTravel = Math.max(maxTravel, Math.hypot(starter.x - home.x, starter.z - home.z))
+  } else if (boarded) break
+}
+assert(opened && boarded, 'Cedar House resident reached the driver door and stole the starter car')
+assert(maxTravel > 8, 'the stolen car moved ' + maxTravel + ' metres')
+assert.equal(kit.inVehicle, false)
+assert(live.availableToSteal(starter))
+assert.equal(city.wanted, 0)
+console.log('PASS visible starter-car theft, occupied-car exclusion, save/load and recovery;', Math.round(maxTravel), 'metres driven.')
+
+let roll = .25
+live.setHardcore(true, { spawnRandom: () => roll })
+live.reset()
+assert(!live.traffic.some(c => c.reckless))
+const empty = live.serialize()
+roll = .24999
+live.restore(empty)
+assert(!live.traffic.some(c => c.reckless), 'loading an empty slot preserves the next scheduled roll')
+for (let i = 0; i < 26 * 30; i++) live.update(1 / 30, countyInput)
+assert.equal(live.traffic.filter(c => c.reckless && !c.police).length, 1)
+for (const [sample, expected] of [[.05, 'pickup'], [.44, 'sedan'], [.8, 'suv']]) {
+  const values = [.24999, sample, .5, .3]
+  live.setHardcore(true, { spawnRandom: () => values.shift() ?? .4 })
+  live.reset()
+  const rusty = live.traffic.find(c => c.reckless)
+  assert.equal(rusty.type, expected)
+  assert(!rusty.police && !rusty.setBeacon)
+  live.restore(live.serialize())
+  assert.equal(live.traffic.find(c => c.reckless).type, expected)
+}
+console.log('PASS 25% cutoff, later spawn, random civilian models and saved selection.')

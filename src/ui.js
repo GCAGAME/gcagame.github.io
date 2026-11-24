@@ -296,6 +296,7 @@ export function createUI(actions = {}) {
     $('loading-screen').hidden = name !== 'loading'
     $('menu-screen').hidden = name !== 'menu'
     $('hud').hidden = name !== 'hud'
+    $('arrest-scene').hidden = name !== 'arrestScene'
     $('panel-screen').hidden = !titles[name]
     sheet.classList.toggle('wide', ['map', 'controls'].includes(name))
     sheet.querySelector('.close-sheet').hidden = name === 'recovery'
@@ -821,7 +822,7 @@ export function createUI(actions = {}) {
         break
       case 'map':
         html =
-          '<div class="full-map"><canvas id="full-map" aria-label="Interactive county map. Click to mark a waypoint."></canvas><span class="atlas-north">N ↑</span><div class="map-zoom"><button data-zoom="out" aria-label="Zoom out">−</button><button data-zoom="in" aria-label="Zoom in">+</button><button data-zoom="fit" aria-label="Fit county" title="Fit county">↺</button></div></div><div class="map-legend"><span><i class="legend-pip"></i> You</span><span><i class="legend-pip orange"></i> Objective</span><span><i class="legend-pip blue"></i> Waypoint</span><button id="clear-waypoint" class="item-button" data-action="clearWaypoint">Clear waypoint</button></div><p class="map-caption">Click the map to mark a waypoint. Scroll to zoom.</p>'
+          '<div class="full-map"><canvas id="full-map" aria-label="Interactive county map. Click to mark a waypoint."></canvas><span class="atlas-north">N ↑</span><div class="map-zoom"><button data-zoom="out" aria-label="Zoom out">−</button><button data-zoom="in" aria-label="Zoom in">+</button><button data-zoom="fit" aria-label="Fit county" title="Fit county">↺</button></div></div><div class="map-legend"><span><i class="legend-pip"></i> You</span><span><i class="legend-pip orange"></i> Objective</span><span><i class="legend-pip blue"></i> Waypoint</span>' + (data.mode === 'hardcore' ? '<span><i class="legend-pip police"></i> Police</span><span><i class="legend-pip suspect"></i> Reckless pedestrian</span>' : '') + '<button id="clear-waypoint" class="item-button" data-action="clearWaypoint">Clear waypoint</button></div><p class="map-caption">Click the map to mark a waypoint. Scroll to zoom.</p>'
         if (data.mode === 'hardcore')
           html += '<div class="shop-routes">' + data.shops.map((s, i) =>
             rowButton('data-shop-route="' + i + '"', 'Route to ' + s.name)).join('') + '</div>'
@@ -1064,6 +1065,7 @@ export function createUI(actions = {}) {
     el.focus()
   }
   return {
+    cinematic: () => setView('arrestScene'),
     menuInput(code) {
       if (!['Confirm', 'Up', 'Down', 'Left', 'Right'].includes(code)) return
       const panel = view === 'menu' ? root.querySelector('.menu-nav') : body

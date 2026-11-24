@@ -154,7 +154,8 @@ export function createSimulation(scene, camera, world) {
     npcs = [],
     patrolCars = []
   const vehicleGroups = [cars, traffic, patrolCars]
-  const patrolPool = []
+  const patrolPool = [], rustyModels = new Map()
+  let nextSpawn = 0, retireTrafficAt = 0
   let hardcore = false, hooks = {}, patrolNavigation, recklessCar, aimFirstPerson = false
   let ramTarget = null, ramTime = 0
   let current = null,
@@ -445,7 +446,7 @@ export function createSimulation(scene, camera, world) {
     let nearest = null,
       best = 2.6
     for (const car of hardcore ? cars.concat(patrolCars) : cars) {
-      if (!car.active || (car.police && !car.available)) continue
+      if (!car.active || car.npcDriver || (car.police && !car.available)) continue
       const d = footprintDistance(player.x, player.z, car)
       if (d <= best && Math.abs(car.y - player.y) < 3) {
         best = d
@@ -467,15 +468,15 @@ export function createSimulation(scene, camera, world) {
     }
     return npc
   }
-  function obstacleForFeet(x, z) {
-    if (blocked(x, z, 0.29, player.y + 0.34, player.y + (player.crouching ? 1.24 : 1.8)))
+  function obstacleForFeet(x, z, person = player) {
+    if (blocked(x, z, 0.29, person.y + 0.34, person.y + (player.crouching ? 1.24 : 1.8)))
       return true
     for (const group of vehicleGroups) for (const car of group) {
       if (
         car.active &&
         Math.hypot(car.x - x, car.z - z) < 5 &&
         footprintDistance(x, z, car) < 0.24 &&
-        Math.abs(player.y - car.y) < car.spec.roof - 0.1
+        Math.abs(person.y - car.y) < car.spec.roof - 0.1
       )
         return true
     }
@@ -613,6 +614,32 @@ export function createSimulation(scene, camera, world) {
     if (snapping || t < 1) camera.position.copy(temp)
     else camera.position.lerp(temp, 1 - Math.exp(-14 * dt))
   }
+  function arrestShot(officer, t, dt) {
+    if (current) {
+      avatar.group.visible = true
+      avatar.group.scale.setScalar(driverSeat(current, avatar))
+      avatar.group.position.copy(seatAnchor)
+      avatar.group.quaternion.copy(current.model.group.quaternion)
+      current.model.showCockpit(false, current)
+      posePerson(avatar, dt, 0, { driver: true })
+    } else {
+      avatar.group.visible = true
+      avatar.group.scale.setScalar(1)
+      avatar.group.position.set(player.x, player.y, player.z)
+      avatar.group.rotation.set(0, Math.atan2(player.x - officer.x, player.z - officer.z), 0)
+      posePerson(avatar, dt, 0, { crouch: t > .9 })
+    }
+    const facing = Math.atan2(officer.x - player.x, officer.z - player.z)
+    const close = t > 1.65
+    const pan = facing + (close ? .7 : 1.45) + .12 * t
+    const dolly = (current ? 2.3 : 0) + (close ? 3.4 : 5.4)
+    targetCam.set((player.x + officer.x) / 2, player.y + (close ? .98 : 1.18), (player.z + officer.z) / 2)
+    desiredCam.set(targetCam.x + Math.sin(pan) * dolly, targetCam.y + (close ? .45 : 1.05),
+      targetCam.z + Math.cos(pan) * dolly)
+    chase(targetCam, desiredCam, t < .12 ? 1 : dt)
+    camera.lookAt(targetCam)
+    posePerson(officer.model, dt, 0, { look: true })
+  }
   function traceCar(c, x, z, yaw, dx = 0, dz = 0, turn = 0, footprint = null, hit = null) {
     const width = c.spec.width,
       length = c.spec.length,
@@ -666,7 +693,7 @@ export function createSimulation(scene, camera, world) {
     return first
   }
   function parkCar(c, destination) {
-    if (c === current || !cars.includes(c) || !destination) return false
+    if (c === current || c.npcDriver || !cars.includes(c) || !destination) return false
     const { x, z, yaw } = destination
     if (![x, z, yaw].every(Number.isFinite) || traceCar(c, x, z, yaw) !== 1) return false
     const proposed = { x, z, yaw, spec: c.spec }
@@ -1079,8 +1106,9 @@ export function createSimulation(scene, camera, world) {
     hardcore = !!enabled
     if (!hardcore) {
       if (current?.police) respawn()
-      traffic.splice(traffic.indexOf(recklessCar), 1)
-      for (const c of [recklessCar, ...patrolCars]) {
+      removeReckless()
+      for (const c of cars) releaseStolen(c)
+      for (const c of patrolCars) {
         c.active = c.model.group.visible = false
         scene.remove(c.model.group)
       }
@@ -1092,13 +1120,7 @@ export function createSimulation(scene, camera, world) {
       aimFirstPerson = false
       return
     }
-    if (!recklessCar) {
-      const route = routes[1], progress = route.total * .52
-      const at = sampleRoute(route, progress)
-      recklessCar = carEntity('pickup', at.x, at.z, at.yaw, 'reckless-driver', 0x948368, true)
-      Object.assign(recklessCar, { name: 'Weathered Range C150', role: 'reckless-driver',
-        reckless: true, route, initialProgress: progress, progress, cruise: 7.6 })
-      weatherRecklessCar(recklessCar)
+    if (!patrolPool.length) {
       for (const [i, [x, z]] of PATROL_POSTS.entries()) {
         const c = carEntity('sedan', x, z, 0, 'patrol-' + i, 0x243844, true)
         Object.assign(c, { name: 'County Patrol Cruiser', police: true, homeIndex: i })
@@ -1107,10 +1129,9 @@ export function createSimulation(scene, camera, world) {
       }
       patrolNavigation = createNavigation(world.roads)
     }
-    traffic.push(recklessCar)
     patrolCars.push(...patrolPool)
-    for (const c of [recklessCar, ...patrolCars]) scene.add(c.model.group)
-    resetSpecialVehicles()
+    for (const c of patrolCars) scene.add(c.model.group)
+    resetSpecialVehicles(false)
   }
   function placePatrol(c) {
     const [x, z] = PATROL_POSTS[c.homeIndex]
@@ -1126,18 +1147,59 @@ export function createSimulation(scene, camera, world) {
     }
     return false
   }
-  function resetSpecialVehicles() {
-    if (!hardcore) return
-    for (const c of traffic) { c.driverHealth = 100; c.driverRecovery = 0 }
-    const r = recklessCar
-    Object.assign(r, sampleRoute(r.route, r.initialProgress), {
-      progress: r.initialProgress, active: true, speed: 5, condition: 64, crashUntil: 0,
-      reportAfter: 0, policePursued: false, policeStop: 0, incidentPause: 0, burstAt: 8,
-      burstUntil: 0, weave: 0, evadeUntil: 0,
-    })
-    r.travelYaw = r.yaw
+  function removeReckless() {
+    if (!recklessCar) return
+    traffic.splice(traffic.indexOf(recklessCar), 1)
+    scene.remove(recklessCar.model.group)
+    recklessCar.active = recklessCar.model.group.visible = false
+    recklessCar = null
+  }
+  function spawnReckless(saved) {
+    const random = hooks.spawnRandom || Math.random
+    nextSpawn = elapsed + 25
+    if (!saved && random() >= .25) return
+    const types = ['pickup', 'sedan', 'suv']
+    const type = saved ? (types.includes(saved.type) ? saved.type : 'pickup') : types[Math.floor(random() * types.length)]
+    const routeIndex = saved ? (routes[saved.routeIndex] ? saved.routeIndex : 1) : (1 + Math.floor(random() * routes.length)) % routes.length
+    const route = routes[routeIndex]
+    let progress = (saved && Number.isFinite(saved.progress) ? saved.progress : random() * route.total) % route.total
+    let r = rustyModels.get(type)
+    if (!r) {
+      r = carEntity(type, 0, 0, 0, 'reckless-driver', 0x948368, true)
+      r.name = 'Weathered ' + r.spec.name
+      r.role = 'reckless-driver'
+      r.reckless = true
+      weatherRecklessCar(r)
+      rustyModels.set(type, r)
+    }
+    let at
+    for (let i = 0; i < 14; i++) {
+      at = sampleRoute(route, progress)
+      const pose = { ...at, spec: r.spec }
+      if (saved || (traceCar(r, at.x, at.z, at.yaw) === 1 &&
+          footprintDistance(player.x, player.z, pose) > 2 &&
+          !npcs.some(p => exposedPerson(p) && footprintDistance(p.x, p.z, pose) < .55))) break
+      progress = (progress + 11) % route.total
+      at = null
+    }
+    if (!at) { scene.remove(r.model.group); return }
+    Object.assign(r, at, { route, routeIndex, initialProgress: progress, progress, active: true,
+      speed: 5, condition: 64, crashUntil: 0, driverHealth: 100, driverRecovery: 0, cruise: 7.6,
+      reportAfter: 0, policePursued: false, policeStop: 0, incidentPause: 0, burstAt: elapsed + 8,
+      burstUntil: 0, weave: 0, evadeUntil: 0, travelYaw: at.yaw, clearPose: null, alertUntil: 0 })
+    retireTrafficAt = elapsed + (Number.isFinite(saved?.remaining) ? clamp(saved.remaining, 0, 120) : 120)
+    recklessCar = r
+    traffic.push(r)
+    scene.add(r.model.group)
     positionCar(r, 1)
     updateCarAppearance(r, false)
+  }
+  function resetSpecialVehicles(roll = true) {
+    if (!hardcore) return
+    removeReckless()
+    nextSpawn = 0
+    for (const c of traffic) { c.driverHealth = 100; c.driverRecovery = 0 }
+    if (roll) spawnReckless()
     for (const c of patrolCars) {
       Object.assign(c, { active: false, speed: 0, driverActive: false, available: true, taken: false,
         pursuitTarget: null, path: [], routeGoal: null, routeAfter: 0, fuel: 100, condition: 100,
@@ -1167,12 +1229,12 @@ export function createSimulation(scene, camera, world) {
     Object.assign(c, { driverActive: true, available: false, pursuitTarget: { x: target.x, z: target.z } })
     return c
   }
-  function advancePatrol(c, i, dt, night) {
+  function advanceRoadDriver(c, i, dt, night) {
     if (!c.active || c === current) return
     const interval = distance(player, c) > 130 ? 4 : 1
     if ((tick + i) % interval !== 0) return
     const step = dt * interval, goal = c.pursuitTarget
-    c.setBeacon(elapsed, !!(c.driverActive && goal))
+    c.setBeacon?.(elapsed, !!(c.driverActive && goal))
     if (c.driverActive && goal) {
       if (!c.routeGoal || (elapsed >= c.routeAfter && distance(c.routeGoal, goal) > 6)) {
         const path = patrolNavigation.route(c, goal).slice(1)
@@ -1187,7 +1249,7 @@ export function createSimulation(scene, camera, world) {
       const next = c.path[0]
       if (next) {
         const diff = angle(Math.atan2(c.x - next.x, c.z - next.z) - c.yaw)
-        const speed = Math.min(16, 5.2 + distance(c, next), 17 / (1 + 3 * Math.abs(diff)))
+        const speed = Math.min(c.police ? 16 : 11, 5.2 + distance(c, next), 17 / (1 + 3 * Math.abs(diff)))
         c.speed = approach(c.speed, speed, step * (c.speed > speed ? 5 : 3.8))
         const turn = clamp(diff, -step * 1.7, step * 1.7)
         const yaw = angle(c.yaw + turn)
@@ -1483,13 +1545,11 @@ export function createSimulation(scene, camera, world) {
 
   const seatAnchor = new THREE.Vector3()
   const transferKeys = new Set()
-  function presentDriver(dt) {
-    const car = current || transfer?.car
-    if (!car) return
+  function driverSeat(car, model) {
     const cabin = car.model.cabin
     const body = car.model.group
     const footwell = car.spec.wheel * 0.65
-    const pose = avatar.driverPose
+    const pose = model.driverPose
     const scale = pose
       ? Math.min(1, (car.spec.roof - 0.07 - footwell) / (pose.top - pose.bottom))
       : 1
@@ -1503,6 +1563,23 @@ export function createSimulation(scene, camera, world) {
       .set(cabin.x, base, cabin.z + 0.05)
       .applyQuaternion(body.quaternion)
       .add(body.position)
+    return scale
+  }
+  function presentOccupant(p, dt) {
+    const group = p.model.group
+    const range = distance(p, player)
+    group.visible = range < 38
+    if (!group.visible) return
+    group.scale.setScalar(driverSeat(p.ride, p.model))
+    group.position.copy(seatAnchor)
+    group.quaternion.copy(p.ride.model.group.quaternion)
+    if (p.model.detailed !== (range < 16) || p.model.shadow) setPersonDetail(p.model, range < 16, false)
+    posePerson(p.model, dt, 0, { driver: true })
+  }
+  function presentDriver(dt) {
+    const car = current || transfer?.car
+    if (!car) return
+    const body = car.model.group, scale = driverSeat(car, avatar)
     avatar.group.visible = transfer ? true : !driverView
     if (!transfer) {
       avatar.group.quaternion.copy(body.quaternion)
@@ -1539,7 +1616,7 @@ export function createSimulation(scene, camera, world) {
   }
 
   // Test short footpaths on both sides of the bumpers before committing to a walk.
-  function driverPath(car) {
+  function driverPath(car, person = player) {
     const c = Math.cos(car.yaw), s = Math.sin(car.yaw)
     const side = car.spec.width / 2 + 0.57, end = car.spec.length / 2 + 0.58
     const point = (x, z) => ({ x: car.x + c*x + s*z, z: car.z - s*x + c*z })
@@ -1551,14 +1628,14 @@ export function createSimulation(scene, camera, world) {
     }
     let best = null, shortest = Infinity
     for (const route of routes) {
-      let from = player, length = 0
+      let from = person, length = 0
       for (const to of route) {
         const span = distance(from, to), samples = Math.max(1, Math.ceil(span / 0.12))
         let ground = floor(from.x, from.z)
         for (let i = 1; i <= samples; i++) {
           const x = lerp(from.x, to.x, i / samples), z = lerp(from.z, to.z, i / samples)
           const y = floor(x, z)
-          if (obstacleForFeet(x,z) || wetAt(x,z) || Math.abs(y-ground) >= 0.59) {
+          if (obstacleForFeet(x,z,person) || wetAt(x,z) || Math.abs(y-ground) >= 0.59) {
             length = Infinity
             break
           }
@@ -1668,7 +1745,23 @@ export function createSimulation(scene, camera, world) {
     return beginEntry(car)
   }
 
+  function availableToSteal(c) {
+    return hardcore && cars.includes(c) && c.active && !c.npcDriver && c !== current &&
+      transfer?.car !== c && approachDoor?.car !== c && c.fuel > 0 && Math.abs(c.speed) < .5
+  }
+  function stealCar(c, thief, destination) {
+    if (!availableToSteal(c)) return false
+    Object.assign(c, { npcDriver: thief, driverActive: true, pursuitTarget: destination, path: [], routeGoal: null, routeAfter: 0 })
+    c.model.setDoorOpen?.(0)
+    return true
+  }
+  function releaseStolen(c) {
+    if (!c?.npcDriver) return
+    Object.assign(c, { npcDriver: null, driverActive: false, pursuitTarget: null, path: [], routeGoal: null, speed: 0, steer: 0 })
+    c.model.setDoorOpen?.(0)
+  }
   function beginEntry(car) {
+    if (car.npcDriver) return { ok: false, car, message: 'Someone is driving this vehicle.' }
     if (car.police && (!car.active || !car.available))
       return { ok: false, car, message: 'The cruiser is occupied.' }
     startTransfer(car, 'enter', player)
@@ -1767,7 +1860,7 @@ export function createSimulation(scene, camera, world) {
   let remainder = 0,
     pendingX = 0,
     pendingY = 0
-  function reset() {
+  function reset(rollTraffic = true) {
     approachDoor = null
     transfer?.car.model.setDoorOpen?.(0)
     transfer = null
@@ -1777,7 +1870,7 @@ export function createSimulation(scene, camera, world) {
     ramTarget = null
     aimFirstPerson = false
     ramTime = impactSpeed = impactG = 0
-    cars.forEach((c) => { c.clearPose = null; c.crashUntil = 0 })
+    cars.forEach((c) => { releaseStolen(c); c.clearPose = null; c.crashUntil = 0 })
     Object.assign(player, {
       x: -12,
       z: 67,
@@ -1842,7 +1935,7 @@ export function createSimulation(scene, camera, world) {
       positionCar(c, 1)
       updateCarAppearance(c, false)
     }
-    resetSpecialVehicles()
+    resetSpecialVehicles(rollTraffic)
     for (const [i, p] of npcs.entries()) {
       Object.assign(p, {
         x: p.originX,
@@ -1907,8 +2000,23 @@ export function createSimulation(scene, camera, world) {
     }
     if (present) for (const c of cars) updateCarAppearance(c, night)
     if (present && current?.police) updateCarAppearance(current, night)
+    if (hardcore && elapsed >= nextSpawn) {
+      if (!recklessCar) spawnReckless()
+      else {
+        const r = recklessCar
+        nextSpawn = elapsed + 5
+        if (elapsed >= retireTrafficAt && !r.policePursued && !r.policeStop && r.driverHealth > 0 && distance(r, player) > 95) {
+          temp.set(r.x, r.y + 1, r.z).project(camera)
+          if (temp.z > 1 || temp.z < -1 || Math.abs(temp.x) > 1.12 || Math.abs(temp.y) > 1.12) {
+            removeReckless()
+            nextSpawn = elapsed + 25
+          }
+        }
+      }
+    }
+    for (const c of cars) if (c.npcDriver) advanceRoadDriver(c, 0, dt, night)
     traffic.forEach((c, i) => advanceTraffic(c, i, dt, night))
-    patrolCars.forEach((c, i) => advancePatrol(c, i, dt, night))
+    patrolCars.forEach((c, i) => advanceRoadDriver(c, i, dt, night))
     npcs.forEach((p, i) => advancePerson(p, i, dt, input.hour ?? 11, night))
     if (doorIdle > 0) {
       doorIdle -= dt
@@ -1940,12 +2048,13 @@ export function createSimulation(scene, camera, world) {
       },
       cars: cars.map(saveCar),
       ...(hardcore ? {
+        spawnIn: Math.max(0, nextSpawn - elapsed),
         patrolCars: patrolCars.filter((c) => c.active).map((c) => ({ ...saveCar(c), taken: c.taken })),
         trafficDrivers: traffic.map((c) => ({
           id: c.id, progress: c.progress, yaw: c.yaw, speed: c.speed,
           driverHealth: c.driverHealth, condition: c.condition, active: c.active,
           recoverIn: Math.max(0, c.driverRecovery - elapsed),
-          ...(c.reckless ? { weave: c.weave, policeStop: c.policeStop,
+          ...(c.reckless ? { type: c.type, routeIndex: c.routeIndex, remaining: Math.max(0, retireTrafficAt - elapsed), weave: c.weave, policeStop: c.policeStop,
             burstIn: Math.max(0, c.burstAt - elapsed), burstFor: Math.max(0, c.burstUntil - elapsed),
             evadeFor: Math.max(0, c.evadeUntil - elapsed), pauseFor: Math.max(0, c.incidentPause - elapsed),
             reportIn: Math.max(0, c.reportAfter - elapsed) } : {}),
@@ -1979,7 +2088,7 @@ export function createSimulation(scene, camera, world) {
       )
     )
       throw Error('Invalid position in save.')
-    reset()
+    reset(false)
     const p = data.player
     Object.assign(player, {
       x: limitX(p.x, 0.3),
@@ -2018,6 +2127,9 @@ export function createSimulation(scene, camera, world) {
     current = fleet.find((v) => v.active && v.id === data.current) || null
     if (hardcore && Array.isArray(data.trafficDrivers)) {
       const bounded = (value, max, fallback = 0) => Number.isFinite(value) ? clamp(value, 0, max) : fallback
+      nextSpawn = bounded(data.spawnIn, 25, 25)
+      const rusty = data.trafficDrivers.find(d => d?.id === 'reckless-driver')
+      if (rusty) spawnReckless(rusty)
       for (const driver of data.trafficDrivers.slice(0, traffic.length)) {
         const c = traffic.find(v => v.id === driver?.id)
         if (!c || !Number.isFinite(driver.progress) || !Number.isFinite(driver.yaw)) continue
@@ -2063,7 +2175,8 @@ export function createSimulation(scene, camera, world) {
     patrolCars,
     setHardcore,
     spawnCityPerson: actor,
-    dispatchPatrol,
+    dispatchPatrol, presentOccupant, arrestShot, driverPath, availableToSteal, stealCar, releaseStolen,
+    ownedCar: c => hooks.isOwned?.(c.id) ?? (c.id === 'sedan'),
     stopPatrol,
     alertTraffic,
     respawn,

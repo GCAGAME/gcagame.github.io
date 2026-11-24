@@ -243,6 +243,10 @@ export function createCartography() {
         marker(ctx, p, ORANGE, 2.6, true)
     }
     if (mode !== 'overview') {
+      for (const actor of data.mapActors || []) {
+        const police = actor.role === 'police'
+        marker(ctx, project(actor), police ? '#688eff' : '#ecad55', police ? 3.6 : 3, police)
+      }
       for (const shop of data.shops || []) marker(ctx, project(shop), '#f5df8d', 3.4, true)
       const goal = data.missionTarget || (!data.waypoint ? data.target : null)
       if (goal) marker(ctx, project(goal), ORANGE, 4.2, true)

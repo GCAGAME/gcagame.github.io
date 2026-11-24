@@ -4,7 +4,7 @@ import { isWorldOccluded } from './hardcore-sight.js'
 import { presentPedestrian, standNear, walk } from './hardcore-pedestrians.js'
 
 const blocks = [
-  [[-38, 52.1], [-53, 52.1], [-13, 52.1]],
+  [[-13, 61.5], [-13, 52.1], [-38, 52.1]],
   [[12, -72.7], [42, -72.7], [8, -72.7]],
   [[-55.9, -149], [-55.9, -170], [-55.9, -138]],
   [[71.7, -102], [71.7, -92], [71.7, -119]],
@@ -101,7 +101,9 @@ export function createHardcoreCity(scene, world, sim, hooks = {}) {
     // Find a safe standing position beside the actual car before relinquishing it.
     const position = standNear(world, sim, p, car, car.spec.width * .5 + .65)
     if (!position) return false
-    if (!car.taken && car !== sim.vehicle) sim.stopPatrol(car)
+    if (car.npcDriver === p) sim.releaseStolen(car)
+    else if (!car.taken && car !== sim.vehicle) sim.stopPatrol(car)
+    p.model.group.scale.setScalar(1)
     p.inVehicle = false
     p.ride = null
     Object.assign(p, position)
@@ -123,6 +125,11 @@ export function createHardcoreCity(scene, world, sim, hooks = {}) {
   function clearWanted() { retire(cases.get(player)) }
 
   function resetStreet(p, relocated = false) {
+    cancelTheft(p)
+    if (p.ride?.npcDriver === p) sim.releaseStolen(p.ride)
+    p.ride = null
+    p.inVehicle = false
+    p.model.group.scale.setScalar(1)
     const score = i => Math.min(100, distance(blocks[i][0], player)) -
       reckless.filter(other => other !== p && other.district === i).length * 35
     const order = blocks.map((_, i) => (p.slot + i) % blocks.length)
@@ -138,7 +145,7 @@ export function createHardcoreCity(scene, world, sim, hooks = {}) {
     if (!spot) return false
     Object.assign(p, spot, { health: p.maxHealth, inactive: false, interactive: false, fear: null,
       district, roam: 1, hostile: null, armed: false, aimPoint: null, fightUntil: 0,
-      nextAction: clock + 12 + p.slot * 6 + random() * 13,
+      nextAction: clock + 5 + p.slot * 3 + random() * 4,
       nextStrike: clock + 1, speedAI: 1.25, goal: blocks[district][1], managedAI: true })
     return true
   }
@@ -165,6 +172,11 @@ export function createHardcoreCity(scene, world, sim, hooks = {}) {
     if (!enabled) {
       for (const file of [...cases.values()]) retire(file)
       for (const p of [...reckless, ...officers]) {
+        cancelTheft(p)
+        if (p.ride?.npcDriver === p) sim.releaseStolen(p.ride)
+        p.ride = null
+        p.inVehicle = false
+        p.model.group.scale.setScalar(1)
         scene.remove(p.model.group)
         const i = sim.npcs.indexOf(p)
         if (i >= 0) sim.npcs.splice(i, 1)
@@ -246,8 +258,56 @@ export function createHardcoreCity(scene, world, sim, hooks = {}) {
     p.managedAI = false
     p.interactive = p.cityOrigin?.interactive
   }
+  function cancelTheft(p) {
+    if (p.theft?.opening && sim.availableToSteal(p.theft.car)) p.theft.car.model.setDoorOpen?.(0)
+    p.theft = null
+  }
+  function pickTheft(p) {
+    const nearby = sim.cars.filter(c => distance(p, c) <= 24 && sim.availableToSteal(c) &&
+      !reckless.some(other => other.theft?.car === c))
+    nearby.sort((a, b) => Number(sim.ownedCar(b)) - Number(sim.ownedCar(a)) || distance(p, a) - distance(p, b))
+    for (const car of nearby) {
+      const path = sim.driverPath(car, p)
+      if (!path?.length) continue
+      p.theft = { car, path, until: clock + 18, opening: false }
+      return true
+    }
+    return false
+  }
+  function approachTheft(p) {
+    const t = p.theft, car = t.car
+    if (!sim.availableToSteal(car) || clock > t.until) { cancelTheft(p); return false }
+    while (t.path.length > 1 && distance(p, t.path[0]) < .48) t.path.shift()
+    p.goal = t.path[0]
+    p.speedAI = 2.5
+    if (distance(p, p.goal) > .48) return true
+    p.speedAI = 0
+    p.yaw = Math.atan2(p.x - car.x, p.z - car.z)
+    if (!t.opening) {
+      t.opening = true
+      t.enterAt = clock + 1.15
+      car.model.setDoorOpen?.(.85)
+      if (distance(p, player) < 22 && sim.ownedCar(car)) hooks.notify?.(p.name + ' is opening your ' + car.name)
+    } else if (clock >= t.enterAt) {
+      const destination = { x: 0, z: car.z > -60 ? -80 : 60 }
+      if (sim.stealCar(car, p, destination)) {
+        reportCrime('theft', p, p, player)
+        p.ride = car
+        p.inVehicle = true
+        p.leaveAt = clock + 19 + random() * 9
+        synchronize(p)
+        if (distance(p, player) < 30) hooks.notify?.(p.name + ' stole ' + (sim.ownedCar(car) ? 'your ' : 'a ') + car.name)
+      }
+      cancelTheft(p)
+    }
+    return true
+  }
   function streetPlan(p) {
     if (p.inactive) return
+    if (p.inVehicle) {
+      if (clock < p.leaveAt || !stopRiding(p)) return
+      p.nextAction = clock + 32
+    }
     const cop = officers.find(o => o.file?.offender === p && canSee(p, o, 22, false))
     if (cop) {
       p.hostile = null
@@ -255,17 +315,22 @@ export function createHardcoreCity(scene, world, sim, hooks = {}) {
       p.fear = { ...point(cop), until: clock + 4 }
     }
     if (p.fear?.until > clock) {
+      cancelTheft(p)
       p.goal = away(p, p.fear)
       p.speedAI = 4.35
       return
     }
     p.fear = null
+    if (p.hostile) cancelTheft(p)
+    if (p.theft && approachTheft(p)) return
     if (clock >= p.nextAction && !p.hostile) {
       p.nextAction = clock + 28 + random() * 40
+      if ((p.slot === 0 || random() < .48) && pickTheft(p) && approachTheft(p)) return
       const options = basePeople.filter(n => !n.inactive && canSee(p, n, 19, false))
       if (!sim.vehicle && canSee(p, player, 13, false) &&
           (!options.length || random() < .29)) options.unshift(player)
       p.hostile = options[0] || null
+      if (!p.hostile) p.nextAction = clock + 6 + random() * 4
       p.armed = p.slot === 3 && random() < .42
       p.fightUntil = clock + 8 + random() * 3
     }
@@ -390,7 +455,7 @@ export function createHardcoreCity(scene, world, sim, hooks = {}) {
     const last = file.last, target = file.offender
     const sight = canSee(p, target, p.inVehicle ? 51 : 42)
     const gap = distance(p, last)
-    const targetDriving = target === player ? sim.vehicle : target.spec && target
+    const targetDriving = target === player ? sim.vehicle : target.ride || (target.spec && target)
     const movingCar = sight && targetDriving && Math.abs(targetDriving.speed) > 2
     // Every coordinate used for dispatch and search comes from a report or
     // a sighting. An unseen occupant's current speed cannot affect the chase.
@@ -398,9 +463,11 @@ export function createHardcoreCity(scene, world, sim, hooks = {}) {
       const car = p.ride
       if (car.taken || car === sim.vehicle || !car.driverActive) { stopRiding(p); return }
       car.pursuitTarget = point(last)
-      if (gap > (sight ? 15 : 10) || movingCar) return
+      if (gap > (sight ? 12 : 10) || (movingCar && gap > 8)) return
+      car.speed = 0
+      car.pursuitTarget = null
       if (!stopRiding(p)) return
-    } else if (gap > 21 || movingCar) {
+    } else if (gap > 21 || (movingCar && gap > 12)) {
       const car = sim.patrolCars[p.slot]
       if (car && car.active && !car.taken && car !== sim.vehicle && distance(p, car) < gap * .72) {
         if (distance(p, car) <= 3.9) {
@@ -413,7 +480,12 @@ export function createHardcoreCity(scene, world, sim, hooks = {}) {
         }
       }
     }
-    if (!sight && gap < 8) {
+    const reach = targetDriving ? targetDriving.hullRadius + 2 : 3.25
+    if (sight && distance(p, target) <= reach) {
+      p.goal = null
+      p.speedAI = 0
+      p.yaw = Math.atan2(p.x - target.x, p.z - target.z)
+    } else if (!sight && gap < 8) {
       const sweep = Math.floor((clock - file.lastSeen) / 3.2) * 1.9 + p.slot * 2.1
       p.goal = { x: last.x + Math.sin(sweep) * 5, z: last.z + Math.cos(sweep) * 5 }
       p.speedAI = 1.8
@@ -421,8 +493,7 @@ export function createHardcoreCity(scene, world, sim, hooks = {}) {
       steerOnFoot(p, last, sight)
       p.speedAI = gap > 1.35 ? 3.85 + .09 * p.slot : 0
     }
-    if (sight && gap < 3.5 && !movingCar && target !== player &&
-        distance(p, target) < (target.spec ? target.hullRadius + 1 : 1.75)) {
+    if (sight && !movingCar && target !== player && distance(p, target) <= reach) {
       retire(file)
       if (target.spec) target.policeStop = 8
       else if (target.role === 'reckless-pedestrian') resetStreet(target, true)
@@ -435,6 +506,7 @@ export function createHardcoreCity(scene, world, sim, hooks = {}) {
     if (!enabled || !Number.isFinite(dt) || dt <= 0) return
     clock += dt
     for (const p of officers) synchronize(p)
+    for (const p of reckless) synchronize(p)
     if (clock >= nextThink) {
       nextThink = clock + .28
       for (const [p, at] of recoveries) if (clock >= at && restoreActor(p)) recoveries.delete(p)
@@ -453,7 +525,12 @@ export function createHardcoreCity(scene, world, sim, hooks = {}) {
     }
     for (const p of sim.npcs) {
       if (!p.managedAI) continue
-      if (p.inactive || p.inVehicle) { p.model.group.visible = false; continue }
+      if (p.inactive) { p.model.group.visible = false; continue }
+      if (p.inVehicle) {
+        if (sim.presentOccupant) sim.presentOccupant(p, dt)
+        else p.model.group.visible = false
+        continue
+      }
       p.aiStep = (p.aiStep || 0) + dt
       const d = distance(p, player)
       if (p.aiStep < (d < 34 ? .028 : d < 82 ? .095 : .44)) continue
@@ -463,12 +540,12 @@ export function createHardcoreCity(scene, world, sim, hooks = {}) {
     }
     const file = cases.get(player)
     if (!file || player.health <= 0) { arrest = 0; return }
-    const reach = sim.vehicle ? Math.min(4, sim.vehicle.hullRadius + .85) : 1.8
+    const reach = sim.vehicle ? sim.vehicle.hullRadius + 2 : 3.25
     const touching = (!sim.vehicle || Math.abs(sim.vehicle.speed) < 1.4) &&
-      officers.some(p => p.file === file && !p.inVehicle && !p.inactive &&
+      officers.find(p => p.file === file && !p.inVehicle && !p.inactive && p.speedAI === 0 &&
         distance(p, player) <= reach && Math.abs(p.y - player.y) < 1.8 && canSee(p, player, reach, false))
     arrest = Math.max(0, Math.min(1, arrest + dt * (touching ? .55 : -1.1)))
-    if (arrest >= 1) { clearWanted(); hooks.onArrest?.() }
+    if (arrest >= 1) { clearWanted(); hooks.onArrest?.(touching) }
   }
   function serialize() {
     if (!enabled) return null
@@ -476,7 +553,9 @@ export function createHardcoreCity(scene, world, sim, hooks = {}) {
     return {
       cases: [...cases.values()].map(f => ({ id: id(f.offender), stars: f.stars, last: point(f.last),
         unseen: clock - f.lastSeen, decay: Math.max(0, f.decayAt - clock) })),
-      street: reckless.map(p => ({ ...point(p), health: p.health, district: p.district, roam: p.roam })),
+      street: reckless.map(p => ({ ...point(p), health: p.health, district: p.district, roam: p.roam,
+        nextIn: Math.max(0, p.nextAction - clock), ...(p.inVehicle && p.ride ? {
+          car: p.ride.id, destination: p.ride.pursuitTarget, leaveIn: Math.max(0, p.leaveAt - clock) } : {}) })),
       civilians: basePeople.map(p => Math.round(p.health)),
       officers: officers.map(p => ({ ...point(p), health: p.health, active: !p.inactive,
         riding: !!p.inVehicle, suspect: p.file ? id(p.file.offender) : null })),
@@ -498,6 +577,14 @@ export function createHardcoreCity(scene, world, sim, hooks = {}) {
       const spot = standNear(world, sim, p, s)
       if (spot) Object.assign(p, spot, { health: Math.min(p.maxHealth, Math.max(1, Number(s.health) || p.maxHealth)),
         district: s.district, roam: s.roam })
+      if (Number.isFinite(s.nextIn)) p.nextAction = clock + Math.max(0, Math.min(72, s.nextIn))
+      const car = s.car && sim.cars.find(c => c.id === s.car)
+      if (car && validPoint(s.destination) && sim.stealCar(car, p, point(s.destination))) {
+        p.inVehicle = true
+        p.ride = car
+        p.leaveAt = clock + Math.max(1, Math.min(30, Number(s.leaveIn) || 1))
+        synchronize(p)
+      }
     }
     for (const [i, hp] of (Array.isArray(data?.civilians) ? data.civilians : []).slice(0, basePeople.length).entries()) {
       const p = basePeople[i]
@@ -549,6 +636,7 @@ export function createHardcoreCity(scene, world, sim, hooks = {}) {
   }
   return {
     setEnabled, update, reportCrime, damageNpc, alertDanger, clearWanted, targets, serialize, restore,
+    mapActors() { return enabled ? [...officers, ...reckless].filter(p => !p.inactive) : [] },
     get wanted() { return cases.get(player)?.stars || 0 },
     get status() {
       const f = cases.get(player)
