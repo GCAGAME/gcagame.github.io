@@ -36,7 +36,7 @@ export function createGamepad() {
     impactAt = -Infinity
   }
 
-  function poll(focused, onPress, menu = false, now = performance.now()) {
+  function poll(focused, onPress, menu = false, now = performance.now(), armed = false) {
     let pad
     if (focused && !denied) {
       try {
@@ -74,6 +74,7 @@ export function createGamepad() {
       if (navigation) held.add(navigation)
     } else if (pad) {
       buttons.forEach((key, i) => {
+        if (armed) key = ({ 5: 'KeyQ', 6: 'MouseRight', 7: 'PadFire', 13: 'KeyR' })[i] ?? key
         if (key && pad.buttons[i]?.pressed) held.add(key)
       })
       const [x, y] = pad.axes

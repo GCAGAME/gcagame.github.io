@@ -110,6 +110,7 @@ with game_url() as url, sync_playwright() as pw:
     page.locator('[data-dialog="race/' + options.course + '"]').click()
     check('walkTo(-90,-75.5)')
     interact('enter')
+    page.wait_for_function('briar.sim.vehicle?.id === "sedan"')
     interact('start')
     assert check('briar.interactions.activities.state.job.step') == 0
     page.keyboard.press('Tab')

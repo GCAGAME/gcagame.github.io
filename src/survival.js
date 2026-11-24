@@ -21,7 +21,7 @@ export function createSurvival(sim, world, story, notify) {
     for (const key of keys) if (key !== 'ShiftLeft' && key !== 'ShiftRight') tiredKeys.add(key)
     return tiredKeys
   }
-  function update(dt, climate, worn) {
+  function update(dt, climate, worn, countyRescue = true) {
     const p = sim.player
     const running = !sim.vehicle && !p.swimming && p.speed > 4.1,
       water = p.swimming && !sim.vehicle
@@ -49,7 +49,7 @@ export function createSurvival(sim, world, story, notify) {
     if (oldChill < 60 && state.chill >= 60)
       notify('Getting cold · Find shelter or equip a field jacket')
     if (state.chill > 72) p.health = Math.max(0, p.health - dt * 0.57)
-    if (sim.seated) p.health = Math.min(100, p.health + dt * 0.45)
+    if (sim.seated && p.health > 0) p.health = Math.min(100, p.health + dt * 0.45)
     if (p.grounded && airborne) {
       const fall = peak - world.height(p.x, p.z)
       if (fall > 3.25) p.health = Math.max(0, p.health - (fall - 3.25) * 7)
@@ -58,7 +58,7 @@ export function createSurvival(sim, world, story, notify) {
       peak = airborne ? Math.max(peak, p.y) : p.y
       airborne = true
     } else if (sim.vehicle || water) airborne = false
-    if (p.health <= 0) {
+    if (countyRescue && p.health <= 0) {
       const save = sim.serialize(),
         home = world.locations.home
       save.current = null

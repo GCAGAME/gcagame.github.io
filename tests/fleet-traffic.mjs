@@ -173,3 +173,39 @@ for (const car of cars) {
 console.log(
   'PASS fleet detailing, paint and rims, lamps, safe parking, and 150 simulated seconds of actual county traffic.',
 )
+
+// In Low quality, traffic-5 sleeps while the driver is more than 45 m away.
+// Replay the Civic Square Sprint junction where northbound traffic occupied
+// its dormant footprint just before the approaching player woke it up.
+sim.reset()
+world.signalOpen = () => true
+const north = sim.traffic[0], west = sim.traffic[5]
+function placeOnRoute(car, x, z, yaw) {
+  let distanceSoFar = 0, nearest = Infinity
+  for (const [i, a] of car.route.points.entries()) {
+    const b = car.route.points[(i + 1) % car.route.points.length]
+    const len = car.route.lengths[i], dx = b.x - a.x, dz = b.y - a.y
+    const t = Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.y) * dz) / (len * len)))
+    const offset = Math.hypot(a.x + dx * t - x, a.y + dz * t - z)
+    if (offset < nearest) {
+      nearest = offset
+      car.progress = distanceSoFar + len * t
+    }
+    distanceSoFar += len
+  }
+  Object.assign(car, { x, z, yaw, speed: 0 })
+}
+placeOnRoute(north, 2.45, -130.619, 0)
+placeOnRoute(west, 1.452, -132.45, Math.PI / 2)
+Object.assign(sim.player, { x: -7.8, z: -110, y: world.height(-7.8, -110) })
+west.active = west.model.group.visible = false
+for (let n = 0; n < 360; n++) {
+  sim.update(1 / 60, { settings: { quality: 'Low' }, hour: 11 })
+  if (west.active) {
+    assert.equal(sweepHull(boxHull(north.x, north.z, north.spec.width, north.spec.length, north.yaw),
+      boxHull(west.x, west.z, west.spec.width, west.spec.length, west.yaw), 0, 0), 1,
+      'a dormant car must wait until its footprint is clear')
+  }
+}
+assert(west.active && west.x < .5 && north.z < -135, 'both crossing cars must clear the junction')
+console.log('PASS dormant Low-quality driver yields to the occupied Civic Square Sprint junction and resumes.')

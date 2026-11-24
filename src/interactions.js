@@ -280,6 +280,8 @@ export function createInteractions(scene, world, sim, story, hooks) {
       mission = activities.interaction() || (!activities.state.job && story.interaction())
     if (mission) return mission
     if (seated) return { label: 'Stand up', run: stand }
+    const outfitter = hooks.outfitter?.()
+    if (outfitter) return { label: 'Browse ' + outfitter.name, run: () => hooks.panel('outfitters') }
     if (sim.vehicle) {
       if (
         distance(p, world.locations.fuel) < 8 &&

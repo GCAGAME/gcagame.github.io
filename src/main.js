@@ -14,6 +14,8 @@ import { createAudio } from './audio.js'
 import { loadCompressedSurfaces } from './surfaces.js'
 import { createSurvival } from './survival.js'
 import { showroomPreview } from './showroom-preview.js'
+import { createHardcoreCity } from './hardcore-city.js'
+import { createWeapons, weapons as weaponTypes, outfitters } from './hardcore-weapons.js'
 
 const canvas = document.getElementById('game'),
   edgeNotice = document.getElementById('world-edge'),
@@ -44,6 +46,7 @@ const defaultSettings = {
   volume: 0.55,
   vibration: true,
   adaptive: true,
+  bloodEffects: false,
 }
 const presets = {
   Low: {
@@ -96,9 +99,10 @@ const presets = {
   },
 }
 const prefix = 'projectReality.briar.v1.',
-  manualKey = prefix + 'manual',
-  autoKey = prefix + 'auto',
   settingsKey = prefix + 'settings'
+let mode = read(prefix + 'mode') === 'hardcore' ? 'hardcore' : 'normal'
+const slot = (kind, forMode = mode) => prefix + (forMode === 'hardcore' ? 'hardcore.' : '') + kind
+let city, arms, outcome = null, lastPadFire = false
 const numbers = {
   resolution: [0.5, 1.5],
   renderDistance: [120, 800],
@@ -183,6 +187,16 @@ const keys = new Set(),
   cameraDirection = new THREE.Vector3()
 const ui = createUI({
   newGame: startNew,
+  selectMode,
+  recover,
+  outfit: (id, ammo) => {
+    if (screen === 'outfitters') arms.purchase(id, ammo)
+  },
+  guideShop: (index) => {
+    if (screen !== 'map' || mode !== 'hardcore' || !outfitters[index]) return
+    setWaypoint(outfitters[index].x, outfitters[index].z)
+    resume()
+  },
   continue: () => loadGame(false),
   resume,
   save: () => saveGame(true),
@@ -268,6 +282,11 @@ function payload() {
   }
   return {
     world,
+    mode,
+    combat: mode === 'hardcore' ? { ...arms.hud(), wanted: city.wanted, status: city.status, arrest: city.arrestProgress } : null,
+    outfitters: screen === 'outfitters' ? arms.shop() : null,
+    shops: mode === 'hardcore' ? outfitters : [],
+    outcome,
     player: p,
     vehicle: v,
     money: story.state.money,
@@ -312,6 +331,8 @@ function refresh(redraw = false) {
 }
 function clearInput() {
   gamepad.quiet()
+  lastPadFire = false
+  arms?.release()
   keys.clear()
   lookX = lookY = 0
 }
@@ -341,14 +362,14 @@ function setPlaying(wantLock = true) {
   if (wantLock) lock()
 }
 function resume() {
-  if (!active) return
+  if (!active || outcome) return
   setPlaying()
   hudAge = 100
 }
 function openPanel(name) {
-  if (!ready) return
+  if (!ready || (outcome && name !== 'recovery')) return
   if (
-    ['map', 'inventory', 'shop', 'dialog', 'objectives', 'pause', 'dealership'].includes(name) &&
+    ['map', 'inventory', 'shop', 'dialog', 'objectives', 'pause', 'dealership', 'outfitters', 'recovery'].includes(name) &&
     !active
   )
     return
@@ -362,7 +383,7 @@ function openPanel(name) {
   unlock()
   audio.play('ui')
   audio.setActive(false)
-  ui.panel(name, active ? payload() : { settings, world, hasSave: !!latestSave() })
+  ui.panel(name, active ? payload() : { settings, world, mode, hasSave: !!latestSave() })
 }
 function closePanel() {
   if (['settings', 'credits', 'controls'].includes(screen)) {
@@ -379,8 +400,72 @@ function returnMenu() {
   clearInput()
   unlock()
   audio.setActive(false)
-  ui.update({ world, settings })
+  outcome = null
+  ui.update({ world, settings, mode, shops: [] })
   ui.menu(!!latestSave())
+}
+function selectMode(value) {
+  if (screen !== 'menu' || !['normal', 'hardcore'].includes(value)) return
+  mode = value
+  try { localStorage.setItem(prefix + 'mode', JSON.stringify(mode)) } catch {}
+  ui.update({ mode })
+  ui.menu(!!latestSave())
+}
+function configureMode() {
+  const hard = mode === 'hardcore'
+  if (hard && !city) {
+    city = createHardcoreCity(scene, world, sim, {
+      onArrest: () => endEncounter('arrest'),
+      damagePlayer: (amount) => {
+        if (outcome || sim.player.health <= 0) return
+        sim.player.health = Math.max(0, sim.player.health - amount)
+        arms.hit(sim.player)
+      },
+      showHit: npc => arms.hit(npc),
+      onNpcShot: (origin) => {
+        if (Math.hypot(origin.x - sim.player.x, origin.z - sim.player.z) < 38) audio.play('shot')
+      },
+      notify: info,
+    })
+    arms = createWeapons(scene, world, sim, camera, city, {
+      blood: () => settings.bloodEffects, wallet: () => story.state,
+      sound: key => audio.play(key), changed, notify: info,
+    })
+  }
+  sim.setHardcore(hard, {
+    isOwned: id => interactions.dealer.state.owned.includes(id) ||
+      (id === 'sports' && story.state.owned.includes('ownership')) ||
+      (id === 'offroad' && story.state.chapter === 2),
+    onCrime: (kind, actor, x, z) => city.reportCrime(kind === 'recklessDriving' ? 'reckless' : kind, actor, { x, z, y: actor.y }),
+    onCrash: event => city.alertDanger(event, Math.min(25, 5 + event.closingSpeed)),
+    onPedestrianImpact: (npc, damage) => city.damageNpc(npc, damage, sim.player),
+  })
+  city?.setEnabled(hard)
+  arms?.setVisible(hard)
+  outcome = null
+}
+function endEncounter(reason) {
+  if (outcome || mode !== 'hardcore' || applying || screen !== 'hud') return
+  outcome = sim.player.health <= 0 ? 'down' : reason
+  arms.resetAction()
+  openPanel('recovery')
+  saveGame(false)
+}
+function recover() {
+  if (!outcome || screen !== 'recovery') return
+  const fee = Math.min(story.state.money, outcome === 'arrest' ? 25 : 15)
+  story.state.money -= fee
+  interactions.stand(false)
+  city.clearWanted()
+  sim.respawn()
+  survival.reset()
+  arms.resetAction()
+  arms.clearParticles()
+  outcome = null
+  routeAge = 100
+  resume()
+  saveGame(false)
+  info('Back at Cedar House · $' + fee + ' county fee')
 }
 function act() {
   if (!active || screen !== 'hud') return
@@ -422,6 +507,7 @@ function setSetting(key, value) {
   const prev = { ...settings }
   if (key === 'quality' && presets[value]) settings = { ...settings, ...presets[value] }
   settings = sanitizeSettings({ ...settings, [key]: value })
+  if (key === 'bloodEffects' && !settings.bloodEffects) arms?.clearParticles()
   configure(prev)
   try {
     localStorage.setItem(settingsKey, JSON.stringify(settings))
@@ -430,8 +516,9 @@ function setSetting(key, value) {
   if (key === 'quality' && screen === 'settings') ui.panel('settings', { settings })
   if (active) savePending = true
 }
-function valid(save) {
+function valid(save, forMode = mode) {
   if (save?.version !== 1 || !Number.isFinite(save.time)) return false
+  if ((save.mode ?? 'normal') !== forMode) return false
   const s = save.sim,
     p = s?.player,
     c = save.story,
@@ -451,6 +538,14 @@ function valid(save) {
   )
     return false
   const ids = new Set(s.cars.map((v) => v.id))
+  if (forMode === 'hardcore' && s.patrolCars !== undefined) {
+    if (!Array.isArray(s.patrolCars) || s.patrolCars.length > 5) return false
+    for (const v of s.patrolCars) {
+      if (!pose(v) || !/^patrol-[0-4]$/.test(v.id) || ids.has(v.id) ||
+          !Number.isFinite(v.fuel) || !Number.isFinite(v.condition)) return false
+      ids.add(v.id)
+    }
+  }
   if (
     !['sedan', 'suv', 'sports', 'pickup', 'offroad'].every((id) => ids.has(id)) ||
     (s.current && !ids.has(s.current))
@@ -511,8 +606,7 @@ function exportJourney() {
   setTimeout(() => URL.revokeObjectURL(url), 60000)
 }
 function importJourney() {
-  const occupied = () => active || [manualKey, autoKey].some(key => localStorage.getItem(key) !== null)
-  if (occupied()) return info('Import is available in a browser with empty save slots.')
+  const occupied = m => active || ['manual', 'auto'].some(kind => localStorage.getItem(slot(kind, m)) !== null)
   const input = document.createElement('input')
   input.type = 'file'
   input.accept = '.json,application/json'
@@ -527,9 +621,12 @@ function importJourney() {
             (typeof value === 'string' && /[<>&"'\x00-\x1f]/.test(value))) throw Error()
         return value
       })
-      if (!valid(journey)) throw Error()
-      if (occupied()) return info('The destination already has a saved journey.')
-      localStorage.setItem(manualKey, JSON.stringify(journey))
+      const importedMode = journey.mode ?? 'normal'
+      if (!['normal','hardcore'].includes(importedMode) || !valid(journey, importedMode)) throw Error()
+      if (occupied(importedMode)) return info('That mode already has a saved journey.')
+      localStorage.setItem(slot('manual', importedMode), JSON.stringify(journey))
+      mode = importedMode
+      try { localStorage.setItem(prefix + 'mode', JSON.stringify(mode)) } catch {}
       latestSave()
       ui.update({ hasSave: true })
       info('Journey imported. Choose Continue from the main menu.')
@@ -540,16 +637,18 @@ function importJourney() {
   input.click()
 }
 function latestSave(preferManual = false) {
-  const manual = read(manualKey),
-    auto = read(autoKey)
+  const manual = read(slot('manual')),
+    auto = read(slot('auto'))
   manualAvailable = valid(manual) || valid(auto)
   if (preferManual && valid(manual)) return manual
-  return [manual, auto].filter(valid).sort((a, b) => b.time - a.time)[0] || null
+  return [manual, auto].filter(s => valid(s)).sort((a, b) => b.time - a.time)[0] || null
 }
 function saveGame(manual = false) {
   if (!active || applying || !ready) return false
   const data = {
     version: 1,
+    mode,
+    ...(mode === 'hardcore' ? { hardcore: { arms: arms.serialize(), city: city.serialize(), outcome } } : {}),
     time: Date.now(),
     sim: sim.serialize(),
     story: story.state,
@@ -560,7 +659,7 @@ function saveGame(manual = false) {
     settings,
   }
   try {
-    localStorage.setItem(manual ? manualKey : autoKey, JSON.stringify(data))
+    localStorage.setItem(slot(manual ? 'manual' : 'auto'), JSON.stringify(data))
     savedAt = data.time
     manualAvailable = true
     autosaveAge = 0
@@ -585,6 +684,7 @@ function loadGame(manual = false) {
   }
   const previous = active
     ? {
+        hardcore: mode === 'hardcore' && { arms: arms.serialize(), city: city.serialize(), outcome },
         sim: sim.serialize(),
         story: JSON.parse(JSON.stringify(story.state)),
         climate: { ...climate.state },
@@ -594,11 +694,18 @@ function loadGame(manual = false) {
       }
     : null
   function restore(v) {
+    configureMode()
     sim.restore(v.sim)
     story.restore(v.story)
     climate.restore(v.climate)
     interactions.restore(v.interactions)
     survival.reset(v.survival)
+    if (mode === 'hardcore') {
+      city.restore(v.hardcore?.city)
+      arms.restore(v.hardcore?.arms)
+      outcome = ['arrest', 'down'].includes(v.hardcore?.outcome) ? v.hardcore.outcome : null
+      if (outcome === 'down') sim.player.health = 0
+    }
     waypoint =
       v.waypoint && Number.isFinite(v.waypoint.x) && Number.isFinite(v.waypoint.z)
         ? v.waypoint
@@ -608,7 +715,8 @@ function loadGame(manual = false) {
   try {
     restore(s)
     const old = settings
-    settings = sanitizeSettings({ ...s.settings, ...read(settingsKey) })
+    const localSettings = read(settingsKey)
+    settings = sanitizeSettings({ ...s.settings, ...localSettings, bloodEffects: localSettings?.bloodEffects === true })
     configure(old)
   } catch {
     if (previous) restore(previous)
@@ -621,17 +729,23 @@ function loadGame(manual = false) {
   autosaveAge = 0
   savePending = false
   routeAge = 100
-  setPlaying()
+  setPlaying(!outcome)
+  if (outcome) openPanel('recovery')
   refresh()
   info('Journey restored')
 }
 function startNew() {
   if (!ready) return
   applying = true
+  configureMode()
   sim.reset()
   story.reset()
   interactions.restore()
   survival.reset()
+  if (mode === 'hardcore') {
+    city.restore()
+    arms.restore()
+  }
   waypoint = null
   route = []
   routeAge = 100
@@ -699,6 +813,17 @@ function onKey(e, down) {
 function pressAction(code) {
   if (sim.seated && ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space'].includes(code)) interactions.stand()
   switch (code) {
+    case 'KeyR':
+      if (mode === 'hardcore') arms.reload()
+      break
+    case 'KeyQ':
+      if (mode === 'hardcore') arms.cycle()
+      break
+    case 'Digit1':
+    case 'Digit2':
+    case 'Digit3':
+      if (mode === 'hardcore') arms.equip(weaponTypes[Number(code.slice(-1)) - 1].id)
+      break
     case 'Escape':
       openPanel('pause')
       break
@@ -769,12 +894,14 @@ canvas.addEventListener('mousedown', (e) => {
     return
   }
   if (e.button === 0) {
-    if (document.pointerLockElement !== canvas) lock()
+    if (document.pointerLockElement !== canvas && !unlockedFallback) return lock()
+    if (mode === 'hardcore' && sim.canUseWeapon) arms.trigger(true)
     else act()
   }
 })
 document.addEventListener('mouseup', (e) => {
   if (e.button === 2) keys.delete('MouseRight')
+  if (e.button === 0) arms?.trigger(false)
 })
 canvas.addEventListener('contextmenu', (e) => e.preventDefault())
 function suspend() {
@@ -819,7 +946,7 @@ function frame(now) {
     else if (code === 'Escape' || (screen === 'map' && code === 'KeyM'))
       closePanel()
     else ui.menuInput(code)
-  }, previousScreen !== 'hud', now)
+  }, previousScreen !== 'hud', now, mode === 'hardcore' && !sim?.vehicle)
   if (screen !== 'hud' || !active) {
     previousFrame = now
     lastRender = 0
@@ -851,7 +978,16 @@ function frame(now) {
     wet: c.wet,
     night: c.night,
   })
-  survival.update(dt, c, interactions.worn)
+  if (mode === 'hardcore') {
+    if (pad.held.has('PadFire')) arms.trigger(true)
+    else if (lastPadFire) arms.trigger(false)
+    lastPadFire = pad.held.has('PadFire')
+    arms.update(dt, inputKeys.has('MouseRight'))
+    city.update(dt)
+  }
+  if (screen !== 'hud') return
+  survival.update(dt, c, interactions.worn, mode !== 'hardcore')
+  if (mode === 'hardcore' && p.health <= 0) return endEncounter('down')
   const edgeGap = clearance(p.x, p.z)
   if (edgeNotice.hidden && edgeGap < (sim.vehicle ? 4 : 1)) edgeNotice.hidden = false
   else if (!edgeNotice.hidden && edgeGap > 8) edgeNotice.hidden = true
@@ -893,7 +1029,7 @@ function frame(now) {
   if (sim.vehicle && sim.firstPerson) renderCabinMirror(renderer, scene, camera, sim.vehicle, now)
   graphics.render(
     settings,
-    keys.has('MouseRight'),
+    inputKeys.has('MouseRight'),
     dx,
     dy,
     c.wet,
@@ -978,6 +1114,7 @@ async function boot() {
     })
     survival = createSurvival(sim, world, story, info)
     interactions = createInteractions(scene, world, sim, story, {
+      outfitter: () => mode === 'hardcore' ? arms?.nearbyShop() : null,
       preview: showroomPreview(renderer, scene),
       notify: info,
       changed,
@@ -1022,7 +1159,7 @@ async function boot() {
     THREE.DefaultLoadingManager.onLoad = undefined
     await window.studioIntroFinished
     ready = true
-    ui.update({ world, settings })
+    ui.update({ world, settings, mode })
     screen = 'menu'
     ui.menu(!!latestSave())
     requestAnimationFrame(frame)
@@ -1039,13 +1176,14 @@ async function boot() {
           camera,
           navigation,
           interactions,
+          get hardcore() { return mode === 'hardcore' ? { arms, city, outcome } : null },
           survival,
           settings: () => settings,
           screen: () => screen,
           save: saveGame,
           load: loadGame,
           refresh,
-          actions: { startNew, resume, openPanel, setSetting, act },
+          actions: { startNew, resume, openPanel, setSetting, act, selectMode },
         },
       })
   } catch (err) {

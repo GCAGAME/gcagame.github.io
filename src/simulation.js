@@ -2,6 +2,8 @@ import { clearance, limitX, limitZ, carMargins } from './boundary.js'
 import { boxHull, circleHits, sweepHull } from './collision.js'
 import * as THREE from 'three'
 import { makeCar, vehicleSpecs } from './sim-models.js'
+import { createNavigation } from './navigation.js'
+import { markPatrolCar, weatherRecklessCar, measureImpact, impactInjury } from './hardcore-vehicles.js'
 import { makePerson, posePerson, setPersonDetail, setPersonAppearance } from './people.js'
 
 const STANDARD_GRAVITY = 9.80665
@@ -34,6 +36,8 @@ const SPOTS = [
 ]
 const SIGNAL_X = [-64, 0, 64],
   SIGNAL_Z = [0, -80, -130, -180]
+const PATROL_POSTS = [[-4.5, 25], [60, -104], [-60, -154], [4, -201], [-60, 32]]
+const exposedPerson = (p) => !p.inactive && !p.inVehicle
 const CAM_ORDER = new THREE.Euler(0, 0, 0, 'YXZ')
 const temp = new THREE.Vector3(),
   desiredCam = new THREE.Vector3(),
@@ -147,7 +151,12 @@ export function createSimulation(scene, camera, world) {
   scene.add(avatar.group)
   const cars = [],
     traffic = [],
-    npcs = []
+    npcs = [],
+    patrolCars = []
+  const vehicleGroups = [cars, traffic, patrolCars]
+  const patrolPool = []
+  let hardcore = false, hooks = {}, patrolNavigation, recklessCar, aimFirstPerson = false
+  let ramTarget = null, ramTime = 0
   let current = null,
     first = true,
     driverView = false,
@@ -191,10 +200,10 @@ export function createSimulation(scene, camera, world) {
     }
     if (
       (!current && personHits(player, 0.29, player.crouching ? 1.24 : 1.8)) ||
-      npcs.some((p) => personHits(p, 0.2, 1.8))
+      npcs.some((p) => exposedPerson(p) && personHits(p, 0.2, 1.8))
     )
       return true
-    for (const group of [cars, traffic])
+    for (const group of vehicleGroups)
       for (const car of group) {
         if (
           !car.active ||
@@ -435,7 +444,8 @@ export function createSimulation(scene, camera, world) {
   function nearestCar() {
     let nearest = null,
       best = 2.6
-    for (const car of cars) {
+    for (const car of hardcore ? cars.concat(patrolCars) : cars) {
+      if (!car.active || (car.police && !car.available)) continue
       const d = footprintDistance(player.x, player.z, car)
       if (d <= best && Math.abs(car.y - player.y) < 3) {
         best = d
@@ -448,6 +458,7 @@ export function createSimulation(scene, camera, world) {
     let npc = null,
       d = 3.5
     for (const p of npcs) {
+      if (!exposedPerson(p)) continue
       const dist = distance(player, p)
       if (dist < d) {
         npc = p
@@ -459,7 +470,7 @@ export function createSimulation(scene, camera, world) {
   function obstacleForFeet(x, z) {
     if (blocked(x, z, 0.29, player.y + 0.34, player.y + (player.crouching ? 1.24 : 1.8)))
       return true
-    for (const car of cars.concat(traffic)) {
+    for (const group of vehicleGroups) for (const car of group) {
       if (
         car.active &&
         Math.hypot(car.x - x, car.z - z) < 5 &&
@@ -536,11 +547,11 @@ export function createSimulation(scene, camera, world) {
     player.surface = surfaceAt(player.x, player.z)
     phase += dt * player.speed * (player.swimming ? 1.3 : 2.9)
     player.steps = Math.floor(phase / Math.PI)
-    if (player.health < 100 && (foodClock += dt) > 4) {
+    if ((!hardcore || player.health > 0) && player.health < 100 && (foodClock += dt) > 4) {
       player.health = Math.min(player.health + 0.55, 100)
       foodClock = 0
     }
-    avatar.group.visible = !!approachDoor || !first
+    avatar.group.visible = !!approachDoor || (!first && !aimFirstPerson)
     avatar.group.position.set(player.x, player.y, player.z)
     if (!transfer) {
       const facing = player.speed > .35 ? Math.atan2(-vx, -vz) : player.yaw
@@ -550,7 +561,7 @@ export function createSimulation(scene, camera, world) {
     }
     headHeight = damp(headHeight, seat ? 1.19 : player.crouching ? 1.13 : 1.65, 12, dt)
     targetCam.set(player.x, player.y + headHeight, player.z)
-    if (first && !approachDoor) {
+    if ((first || aimFirstPerson) && !approachDoor) {
       const bob =
         settings.headBob !== false && player.grounded
           ? Math.sin(phase * 2) * 0.024 * Math.min(1, player.speed / 3)
@@ -602,7 +613,7 @@ export function createSimulation(scene, camera, world) {
     if (snapping || t < 1) camera.position.copy(temp)
     else camera.position.lerp(temp, 1 - Math.exp(-14 * dt))
   }
-  function traceCar(c, x, z, yaw, dx = 0, dz = 0, turn = 0, footprint = null) {
+  function traceCar(c, x, z, yaw, dx = 0, dz = 0, turn = 0, footprint = null, hit = null) {
     const width = c.spec.width,
       length = c.spec.length,
       radius = c.hullRadius
@@ -617,34 +628,40 @@ export function createSimulation(scene, camera, world) {
     const reach = radius + padding
     const halfX = reach + Math.abs(dx) * .5, halfZ = reach + Math.abs(dz) * .5
     let first = 1
+    const candidate = hit ? {} : null
+    function check(poly, other, person = null) {
+      const t = sweepHull(moving, poly, dx, dz, padding, candidate)
+      if (t >= first) return
+      first = t
+      if (hit) Object.assign(hit, { nx: candidate.nx, nz: candidate.nz, other, person })
+    }
     for (const shape of world.candidates(midX, midZ, reach + travel * .5)) {
       // Grid cells include shapes elsewhere on the block. Only overlapping
       // swept bounds need an exact separating-axis test.
       if (Math.abs(shape.x - midX) > halfX + shape.w * .5 ||
           Math.abs(shape.z - midZ) > halfZ + shape.d * .5) continue
       if (shape.top < bottom || shape.y > top) continue
-      first = Math.min(first, sweepHull(moving, shape.poly, dx, dz, padding))
+      check(shape.poly, null)
     }
-    for (const group of [cars, traffic])
+    for (const group of vehicleGroups)
       for (const other of group) {
         if (other === c || !other.active || other.y > top || other.y + other.spec.roof < bottom)
           continue
         const offsetX = other.x - midX, offsetZ = other.z - midZ
         const range = reach + travel * .5 + other.hullRadius + .15
         if (offsetX * offsetX + offsetZ * offsetZ > range * range) continue
-        first = Math.min(
-          first,
-          sweepHull(
-            moving,
-            boxHull(other.x, other.z, other.spec.width, other.spec.length, other.yaw),
-            dx,
-            dz,
-            padding,
-          ),
-        )
+        check(boxHull(other.x, other.z, other.spec.width, other.spec.length, other.yaw), other)
       }
+    if (hit && c === current && travel > 0) for (const p of npcs) {
+      if (!exposedPerson(p) || Math.abs(p.x - midX) > halfX + .32 ||
+          Math.abs(p.z - midZ) > halfZ + .32 || p.y > top || p.y + 1.75 < bottom) continue
+      check(boxHull(p.x, p.z, .48, .48), null, p)
+    }
     for (const [px, pz] of moving) {
-      if (wetAt(px + dx, pz + dz) || clearance(px, pz) < -0.00001) return 0
+      if (wetAt(px + dx, pz + dz) || clearance(px, pz) < -0.00001) {
+        if (hit && first > 0) Object.assign(hit, { nx: -dx / (travel || 1), nz: -dz / (travel || 1), other: null, person: null })
+        return 0
+      }
     }
     return first
   }
@@ -654,7 +671,7 @@ export function createSimulation(scene, camera, world) {
     if (![x, z, yaw].every(Number.isFinite) || traceCar(c, x, z, yaw) !== 1) return false
     const proposed = { x, z, yaw, spec: c.spec }
     if (!current && footprintDistance(player.x, player.z, proposed) < .45) return false
-    if (npcs.some((p) => footprintDistance(p.x, p.z, proposed) < .4)) return false
+    if (npcs.some((p) => exposedPerson(p) && footprintDistance(p.x, p.z, proposed) < .4)) return false
     Object.assign(c, { x, z, yaw, travelYaw: yaw, clearPose: { x, z, yaw }, speed: 0,
       prevSpeed: 0, steer: 0, lean: 0, tilt: 0, bounce: 0, braking: false, gear: 'N' })
     positionCar(c, 1)
@@ -698,6 +715,72 @@ export function createSimulation(scene, camera, world) {
     snapping = true
     if (c === current) Object.assign(player, { x: c.x, z: c.z, y: c.y, yaw: c.yaw })
     return true
+  }
+  function trackRamIntent(c, dt, accelerating) {
+    let target = null, closest = Math.max(9, c.speed * 1.8)
+    if (accelerating && c.speed > 4) {
+      const sin = Math.sin(c.travelYaw), cos = Math.cos(c.travelYaw)
+      for (const group of vehicleGroups) for (const v of group) {
+        if (v === c || !v.active || Math.abs(v.y - c.y) > 2) continue
+        const x = v.x - c.x, z = v.z - c.z, ahead = -sin * x - cos * z
+        if (ahead < 0 || ahead > closest || Math.abs(cos * x - sin * z) > v.spec.width * .55) continue
+        target = v
+        closest = ahead
+      }
+    }
+    ramTime = target && target === ramTarget ? ramTime + dt : 0
+    ramTarget = target
+  }
+  function alertTraffic(x, z) {
+    if (!hardcore) return
+    for (const car of traffic) if (!car.reckless && Math.hypot(car.x - x, car.z - z) < 24)
+      car.alertUntil = elapsed + 3
+  }
+  function resolveImpact(c, hit) {
+    const other = hit.other
+    const result = measureImpact(c, other, hit.nx, hit.nz)
+    if (result.closingSpeed < 2.4 || elapsed < (c.crashUntil || 0) ||
+        (other && elapsed < (other.crashUntil || 0))) return result
+    c.crashUntil = elapsed + .8
+    if (hit.person) {
+      const injury = impactInjury(result.closingSpeed * 1.35)
+      if (injury) hooks.onPedestrianImpact?.(hit.person, injury, false)
+      alertTraffic(c.x, c.z)
+      return result
+    }
+    if (other) {
+      other.crashUntil = c.crashUntil
+      other.condition = Math.max(12, other.condition - result.deltaB * .85)
+    }
+    for (const [vehicle, delta] of [[c, result.deltaA], [other, result.deltaB]]) {
+      if (vehicle && Number.isFinite(vehicle.driverHealth)) {
+        vehicle.driverHealth = Math.max(0, vehicle.driverHealth - impactInjury(delta))
+        if (!vehicle.driverHealth) vehicle.driverRecovery = elapsed + 40
+      }
+    }
+    c.condition = Math.max(12, c.condition - result.deltaA * .85)
+    const involved = c === current || (other && other === current)
+    const deltaV = other && other === current ? result.deltaB : result.deltaA
+    const damage = involved ? impactInjury(deltaV) : 0
+    if (involved) {
+      player.health = Math.max(0, player.health - damage)
+      impactSpeed = result.closingSpeed
+      impactG = deltaV / (.1 * STANDARD_GRAVITY)
+      current.bounce = .025 + .13 * Math.min(1, deltaV / 16)
+      collisions++
+    }
+    alertTraffic(c.x, c.z)
+    hooks.onCrash?.({ car: c, other, closingSpeed: result.closingSpeed, deltaV, damage, x: c.x, z: c.z })
+    if (other && c === current && other === ramTarget && ramTime >= .65 && result.closingSpeed > 7)
+      hooks.onCrime?.('ram', player, c.x, c.z)
+    else if (c.reckless && other && result.closingSpeed > 4)
+      reportDriver(c)
+    return result
+  }
+  function reportDriver(c) {
+    if (elapsed < (c.reportAfter || 0)) return
+    c.reportAfter = elapsed + 18
+    hooks.onCrime?.('recklessDriving', c, c.x, c.z)
   }
   function updateDrive(dt, keys, settings, lookX, lookY, wet) {
     const c = current,
@@ -767,14 +850,27 @@ export function createSimulation(scene, camera, world) {
       const hitX = Math.abs(nx - c.x - dx) > 1e-7,
         hitZ = Math.abs(nz - c.z - dz) > 1e-7
       if (hitX || hitZ) {
-        const alignment = Math.hypot(
-          hitX ? 0 : Math.sin(c.travelYaw),
-          hitZ ? 0 : Math.cos(c.travelYaw),
-        )
-        c.speed *= Math.exp(-(1 - alignment) * 13 * dt)
+        if (hardcore) {
+          const normalX = hitX ? -dx : 0, normalZ = hitZ ? -dz : 0
+          const length = Math.hypot(normalX, normalZ)
+          if (length > .00001) {
+            const collision = resolveImpact(c, { nx: normalX / length, nz: normalZ / length })
+            const direction = Math.sign(c.speed) || 1
+            c.speed = direction * Math.hypot(collision.vx, collision.vz)
+            c.travelYaw = Math.atan2(-collision.vx * direction, -collision.vz * direction)
+          }
+        } else {
+          const alignment = Math.hypot(
+            hitX ? 0 : Math.sin(c.travelYaw),
+            hitZ ? 0 : Math.cos(c.travelYaw),
+          )
+          c.speed *= Math.exp(-(1 - alignment) * 13 * dt)
+        }
       }
     }
-    const fraction = traceCar(c, c.x, c.z, c.yaw, nx - c.x, nz - c.z, yawStep)
+    if (hardcore) trackRamIntent(c, dt, throttle && !c.braking)
+    const hit = hardcore ? {} : null
+    const fraction = traceCar(c, c.x, c.z, c.yaw, nx - c.x, nz - c.z, yawStep, null, hit)
     if (fraction < 1) {
       const travel = Math.hypot(nx - c.x, nz - c.z) + Math.abs(yawStep) * s.length
       const safe = Math.max(0, fraction - 0.012 / Math.max(0.012, travel))
@@ -782,21 +878,36 @@ export function createSimulation(scene, camera, world) {
       c.z += (nz - c.z) * safe
       c.yaw = angle(c.yaw + yawStep * safe)
       const reboundSpeed = abs > 0.7 ? -Math.sign(c.speed) * Math.min(1.4, abs * 0.12) : 0
-      if (collisionCooldown <= 0) {
-        if (abs > 2.4) {
-          const damage = Math.max(0, (abs - 2) * 0.7)
-          c.condition = Math.max(12, c.condition - damage)
-          player.health = Math.max(15, player.health - damage * 0.36)
-          impactSpeed = abs
-          // Average collision deceleration over a modeled 100 ms contact interval.
-          impactG = Math.abs(c.speed - reboundSpeed) / (0.1 * STANDARD_GRAVITY)
-          c.bounce = 0.025 + 0.13 * Math.min(1, abs / 16)
-          collisions++
+      if (hardcore) {
+        const result = resolveImpact(c, hit)
+        // When the wheel is turned along a wall, preserve the tangential
+        // motion. A square hit against a blocked lane brings the car to rest.
+        const normal = Math.abs(Math.sin(c.travelYaw) * hit.nx + Math.cos(c.travelYaw) * hit.nz)
+        if (!hit.person && normal < .78 && Math.hypot(result.vx, result.vz) > 1) {
+          const direction = Math.sign(c.speed) || 1
+          c.speed = direction * Math.hypot(result.vx, result.vz)
+          c.travelYaw = Math.atan2(-result.vx * direction, -result.vz * direction)
+        } else {
+          c.speed = reboundSpeed
+          c.travelYaw = c.yaw
         }
-        collisionCooldown = 0.25
+      } else {
+        if (collisionCooldown <= 0) {
+          if (abs > 2.4) {
+            const damage = Math.max(0, (abs - 2) * 0.7)
+            c.condition = Math.max(12, c.condition - damage)
+            player.health = Math.max(15, player.health - damage * 0.36)
+            impactSpeed = abs
+            // Average collision deceleration over a modeled 100 ms contact interval.
+            impactG = Math.abs(c.speed - reboundSpeed) / (0.1 * STANDARD_GRAVITY)
+            c.bounce = 0.025 + 0.13 * Math.min(1, abs / 16)
+            collisions++
+          }
+          collisionCooldown = 0.25
+        }
+        c.speed = reboundSpeed
+        c.travelYaw = c.yaw
       }
-      c.speed = reboundSpeed
-      c.travelYaw = c.yaw
     } else {
       c.x = nx
       c.z = nz
@@ -962,10 +1073,151 @@ export function createSimulation(scene, camera, world) {
   function isRedAt(x, z, axis) {
     return world.signalOpen ? !world.signalOpen(axis, x, z) : false
   }
+  function setHardcore(enabled, callbacks = {}) {
+    hooks = callbacks
+    if (hardcore === !!enabled) return
+    hardcore = !!enabled
+    if (!hardcore) {
+      if (current?.police) respawn()
+      traffic.splice(traffic.indexOf(recklessCar), 1)
+      for (const c of [recklessCar, ...patrolCars]) {
+        c.active = c.model.group.visible = false
+        scene.remove(c.model.group)
+      }
+      patrolCars.length = 0
+      for (const c of traffic) {
+        delete c.driverHealth
+        delete c.driverRecovery
+      }
+      aimFirstPerson = false
+      return
+    }
+    if (!recklessCar) {
+      const route = routes[1], progress = route.total * .52
+      const at = sampleRoute(route, progress)
+      recklessCar = carEntity('pickup', at.x, at.z, at.yaw, 'reckless-driver', 0x948368, true)
+      Object.assign(recklessCar, { name: 'Weathered Range C150', role: 'reckless-driver',
+        reckless: true, route, initialProgress: progress, progress, cruise: 7.6 })
+      weatherRecklessCar(recklessCar)
+      for (const [i, [x, z]] of PATROL_POSTS.entries()) {
+        const c = carEntity('sedan', x, z, 0, 'patrol-' + i, 0x243844, true)
+        Object.assign(c, { name: 'County Patrol Cruiser', police: true, homeIndex: i })
+        markPatrolCar(c)
+        patrolPool.push(c)
+      }
+      patrolNavigation = createNavigation(world.roads)
+    }
+    traffic.push(recklessCar)
+    patrolCars.push(...patrolPool)
+    for (const c of [recklessCar, ...patrolCars]) scene.add(c.model.group)
+    resetSpecialVehicles()
+  }
+  function placePatrol(c) {
+    const [x, z] = PATROL_POSTS[c.homeIndex]
+    for (const offset of [0, 6, -6, 12, -12, 18]) {
+      const pose = { x, z: z + offset, yaw: 0, spec: c.spec }
+      if (traceCar(c, pose.x, pose.z, pose.yaw) < 1 ||
+          (!current && footprintDistance(player.x, player.z, pose) < .7) ||
+          npcs.some((p) => exposedPerson(p) && footprintDistance(p.x, p.z, pose) < .55)) continue
+      Object.assign(c, { x, z: pose.z, yaw: 0, travelYaw: 0, active: true, clearPose: null })
+      positionCar(c, 1)
+      updateCarAppearance(c, false)
+      return true
+    }
+    return false
+  }
+  function resetSpecialVehicles() {
+    if (!hardcore) return
+    for (const c of traffic) { c.driverHealth = 100; c.driverRecovery = 0 }
+    const r = recklessCar
+    Object.assign(r, sampleRoute(r.route, r.initialProgress), {
+      progress: r.initialProgress, active: true, speed: 5, condition: 64, crashUntil: 0,
+      reportAfter: 0, policePursued: false, policeStop: 0, incidentPause: 0, burstAt: 8,
+      burstUntil: 0, weave: 0, evadeUntil: 0,
+    })
+    r.travelYaw = r.yaw
+    positionCar(r, 1)
+    updateCarAppearance(r, false)
+    for (const c of patrolCars) {
+      Object.assign(c, { active: false, speed: 0, driverActive: false, available: true, taken: false,
+        pursuitTarget: null, path: [], routeGoal: null, routeAfter: 0, fuel: 100, condition: 100,
+        crashUntil: 0, steer: 0, headlights: false, braking: false, upgraded: false, bounce: 0 })
+      c.model.group.visible = false
+      c.setBeacon(0, false)
+    }
+    placePatrol(patrolCars[0])
+  }
+  function stopPatrol(c) {
+    if (!hardcore || !c?.police || c === current || c.taken) return
+    Object.assign(c, { speed: 0, driverActive: false, available: true, pursuitTarget: null,
+      path: [], routeGoal: null, routeAfter: 0, steer: 0, braking: false })
+    c.setBeacon(0, false)
+  }
+  function dispatchPatrol(index, target, officer = null) {
+    const c = patrolCars[index]
+    if (!hardcore || !c || !Number.isFinite(target?.x) || !Number.isFinite(target?.z) ||
+        c === current || c.taken || approachDoor?.car === c || transfer?.car === c) return null
+    if (c.active && !c.driverActive) {
+      if (officer ? distance(c, officer) > 4 : distance(player, c) < 26) return null
+    }
+    if (!c.active) {
+      const [x, z] = PATROL_POSTS[index]
+      if (Math.hypot(x - player.x, z - player.z) < 26 || !placePatrol(c)) return null
+    }
+    Object.assign(c, { driverActive: true, available: false, pursuitTarget: { x: target.x, z: target.z } })
+    return c
+  }
+  function advancePatrol(c, i, dt, night) {
+    if (!c.active || c === current) return
+    const interval = distance(player, c) > 130 ? 4 : 1
+    if ((tick + i) % interval !== 0) return
+    const step = dt * interval, goal = c.pursuitTarget
+    c.setBeacon(elapsed, !!(c.driverActive && goal))
+    if (c.driverActive && goal) {
+      if (!c.routeGoal || (elapsed >= c.routeAfter && distance(c.routeGoal, goal) > 6)) {
+        const path = patrolNavigation.route(c, goal).slice(1)
+        // End on the projected road when the reported location is off-road.
+        if (!['road', 'asphalt', 'dirt', 'gravel', 'trail'].includes(surfaceAt(goal.x, goal.z))) path.pop()
+        c.path = path
+        c.routeGoal = { x: goal.x, z: goal.z }
+        c.routeAfter = elapsed + 1.8
+      }
+      while (c.path.length && distance(c, c.path[0]) < (c.path.length > 1 ? 2.1 : 1))
+        c.path.shift()
+      const next = c.path[0]
+      if (next) {
+        const diff = angle(Math.atan2(c.x - next.x, c.z - next.z) - c.yaw)
+        const speed = Math.min(16, 5.2 + distance(c, next), 17 / (1 + 3 * Math.abs(diff)))
+        c.speed = approach(c.speed, speed, step * (c.speed > speed ? 5 : 3.8))
+        const turn = clamp(diff, -step * 1.7, step * 1.7)
+        const yaw = angle(c.yaw + turn)
+        const stride = Math.min(c.speed * step * Math.max(0, Math.cos(diff)), distance(c, next))
+        const dx = -Math.sin(yaw) * stride, dz = -Math.cos(yaw) * stride
+        const p = { x: c.x + dx, z: c.z + dz, yaw, spec: c.spec }
+        const nearFeet = (person) => exposedPerson(person) && Math.abs(person.y - c.y) < 2 &&
+          Math.hypot(person.x - p.x, person.z - p.z) < 4 && footprintDistance(person.x, person.z, p) < .42
+        if (traceCar(c, c.x, c.z, c.yaw, dx, dz, turn) === 1 && !npcs.some(nearFeet) &&
+            (current || !nearFeet(player))) {
+          Object.assign(c, { x: p.x, z: p.z, yaw, travelYaw: yaw, steer: clamp(turn / step * .24, -.4, .4) })
+        } else c.speed = 0
+      } else c.speed = 0
+      positionCar(c, step)
+    }
+    updateCarAppearance(c, night)
+  }
   function advanceTraffic(c, i, dt, night) {
     const dist = distance(c, player),
       active =
-        (!night || i % 4 !== 2 || dist < 65) && (quality !== 'low' || i % 3 !== 2 || dist < 45)
+        c.reckless || ((!night || i % 4 !== 2 || dist < 65) && (quality !== 'low' || i % 3 !== 2 || dist < 45))
+    // A sleeping car has no physical presence. Its lane may have filled up
+    // while it was culled, especially on a Low-quality approach to a junction.
+    if (active && !c.active) {
+      const inBody = (p) => Math.abs(p.y - c.y) < c.spec.roof &&
+        Math.abs(p.x - c.x) < c.hullRadius + .4 && Math.abs(p.z - c.z) < c.hullRadius + .4 &&
+        footprintDistance(p.x, p.z, c) < .35
+      if (traceCar(c, c.x, c.z, c.yaw) < 1 || (!current && inBody(player)) ||
+          npcs.some(p => exposedPerson(p) && inBody(p))) return
+    }
     c.active = active
     if (!active) {
       c.model.group.visible = false
@@ -975,15 +1227,36 @@ export function createSimulation(scene, camera, world) {
       return
     }
     const step = dist > 155 ? dt * 4 : dt
+    if (hardcore && c.driverHealth === 0) {
+      if (elapsed >= c.driverRecovery && dist > 60) c.driverHealth = 100
+      else {
+        c.speed = 0
+        c.braking = true
+        updateCarAppearance(c, night)
+        return
+      }
+    }
     // Look ahead along the lane, so drivers signal and ease off before a turn.
     const look = sampleRoute(c.route, c.progress + Math.max(6, c.speed * 1.65))
     const bend = angle(look.yaw - c.yaw)
     c.turnSignal = Math.abs(bend) > .20 ? Math.sign(bend) : 0
     let target = Math.min(c.cruise * (night ? .82 : 1), 10 / (1 + Math.abs(bend)))
+    if (c.reckless && elapsed >= c.burstAt) {
+      c.burstUntil = elapsed + 6 + Math.random() * 4
+      c.burstAt = c.burstUntil + 18 + Math.random() * 17
+    }
+    const reckless = c.reckless && (elapsed < c.burstUntil || c.policePursued) && !(c.policeStop > 0)
+    if (reckless) target = Math.min(17, 20 / (1 + Math.abs(bend) * 1.6))
+    if (hardcore && !reckless && c.alertUntil > elapsed) target = Math.min(target, 2.4)
+    if (c.reckless && (c.policeStop > 0 || c.incidentPause > elapsed)) {
+      c.policeStop = Math.max(0, c.policeStop - step)
+      target = 0
+    }
     const sin = Math.sin(c.yaw), cos = Math.cos(c.yaw)
     const half = c.spec.length * .5
     let room = Infinity
     const yieldTo = (actor) => {
+      if (reckless && actor.spec) return
       const dx = actor.x - c.x, dz = actor.z - c.z
       if (Math.abs(dx) > 25 || Math.abs(dz) > 25) return
       const along = -sin * dx - cos * dz, across = cos * dx - sin * dz
@@ -1002,13 +1275,14 @@ export function createSimulation(scene, camera, world) {
       target = Math.min(target, Math.sqrt(lead * lead + 6.8 * gap), lead + Math.max(0, gap - c.speed * .75) * .65)
     }
     if (!current) yieldTo(player)
-    for (const p of npcs) yieldTo(p)
+    for (const p of npcs) if (exposedPerson(p)) yieldTo(p)
     for (const v of cars) yieldTo(v)
     for (const v of traffic) if (v !== c && v.active) yieldTo(v)
+    for (const v of patrolCars) if (v.active) yieldTo(v)
 
     const axis = Math.abs(sin) > .707 ? 'x' : 'z'
     const probe = signalNear(c.x - sin * 13.5, c.z - cos * 13.5, 11.5)
-    if (probe && isRedAt(probe.x, probe.z, axis)) {
+    if (!reckless && probe && isRedAt(probe.x, probe.z, axis)) {
       const along = -(probe.x - c.x) * sin - (probe.z - c.z) * cos
       const side = (probe.x - c.x) * cos - (probe.z - c.z) * sin
       const line = (axis === 'x' ? (probe.x === 0 ? 5.5 : 4.5) : (probe.z === -80 ? 5.5 : 4.5)) + 3.15 + half
@@ -1020,15 +1294,41 @@ export function createSimulation(scene, camera, world) {
       }
     }
     c.braking = target < c.speed - .1 || (target < .1 && room < .1)
-    c.speed = approach(c.speed, target, step * (c.braking ? 4.8 : 1.65))
+    c.speed = approach(c.speed, target, step * (c.braking ? 4.8 : reckless ? 3.7 : 1.65))
     const movement = Math.min(room, c.speed * step)
+    // A stationary car must not rotate back toward a bend in its route.
+    // Even steering in place can sweep a rear bumper into a stopped neighbour.
+    if (movement <= 0) {
+      c.speed = 0
+      updateCarAppearance(c, night)
+      return
+    }
     const nextProgress = (c.progress + movement) % c.route.total
     const at = sampleRoute(c.route, nextProgress)
+    if (c.reckless) {
+      // A driver drifts within the street, independently of the player's position.
+      const offset = c.evadeUntil > elapsed ? -2.4 : reckless ? .85 * Math.sin(elapsed * 1.12) : 0
+      const sideStep = Math.min(movement * .33, step * (c.evadeUntil > elapsed ? 1.4 : .85))
+      const nextWeave = approach(c.weave, offset, sideStep)
+      at.x += Math.cos(at.yaw) * nextWeave
+      at.z -= Math.sin(at.yaw) * nextWeave
+      at.yaw = angle(at.yaw - Math.atan2(nextWeave - c.weave, Math.max(.18, movement)))
+      at.weave = nextWeave
+      if (reckless && c.speed > 12) reportDriver(c)
+    }
     const dx = at.x - c.x, dz = at.z - c.z
     const yawDelta = angle(at.yaw - c.yaw) * (1 - Math.exp(-10 * step))
     if (movement > 0) {
       const body = boxHull(c.x, c.z, c.spec.width, c.spec.length, c.yaw)
-      if (traceCar(c, c.x, c.z, c.yaw, dx, dz, yawDelta, body) < 1) {
+      const hit = hardcore ? {} : null
+      if (traceCar(c, c.x, c.z, c.yaw, dx, dz, yawDelta, body, hit) < 1) {
+        if (hardcore) {
+          resolveImpact(c, hit)
+          if (c.reckless && c.evadeUntil <= elapsed) {
+            c.incidentPause = elapsed + 1.2
+            c.evadeUntil = elapsed + 7
+          }
+        }
         c.speed = 0
         c.braking = true
         updateCarAppearance(c, night)
@@ -1036,7 +1336,7 @@ export function createSimulation(scene, camera, world) {
       }
       const touches = (p) => Math.abs(c.x - p.x) < 5 && Math.abs(c.z - p.z) < 5 &&
         sweepHull(body, boxHull(p.x, p.z, .62, .62), dx, dz, Math.abs(yawDelta) * half) < 1
-      if ((!current && touches(player)) || npcs.some(touches)) {
+      if ((!current && touches(player)) || npcs.some((p) => exposedPerson(p) && touches(p))) {
         c.speed = 0
         c.braking = true
         updateCarAppearance(c, night)
@@ -1049,6 +1349,8 @@ export function createSimulation(scene, camera, world) {
     c.x = at.x
     c.z = at.z
     c.yaw = angle(c.yaw + yawDelta)
+    if (hardcore) c.travelYaw = c.yaw
+    if (c.reckless) c.weave = at.weave
     c.steer = clamp(angle(c.yaw - old) * smootherTurn(step, c.speed), -0.39, 0.39)
     positionCar(c, step)
     updateCarAppearance(c, night)
@@ -1061,7 +1363,8 @@ export function createSimulation(scene, camera, world) {
     const [ax, az] = cross.a,
       [bx, bz] = cross.b,
       l2 = (bx - ax) ** 2 + (bz - az) ** 2
-    for (const car of current ? [...traffic, current] : traffic) {
+    const crossingCars = hardcore ? traffic.concat(patrolCars) : traffic
+    for (const car of current ? [...crossingCars, current] : crossingCars) {
       if (!car.active || Math.hypot((ax + bx) * 0.5 - car.x, (az + bz) * 0.5 - car.z) > 30) continue
       for (const ahead of [0, 0.5, 1.0, 1.6, 2.1]) {
         const x = car.x - Math.sin(car.yaw) * car.speed * ahead,
@@ -1087,6 +1390,7 @@ export function createSimulation(scene, camera, world) {
     p.rest = 0.18 + (p.from % 3) * 0.18
   }
   function advancePerson(p, i, dt, hour, night) {
+    if (p.managedAI || !exposedPerson(p)) return
     const dist = distance(player, p)
     p.model.group.visible = dist < (quality === 'low' ? 43 : 76)
     const near = dist < (PERSON_DETAIL[quality] ?? 12) * (p.model.detailed ? 1.09 : 0.94)
@@ -1132,7 +1436,7 @@ export function createSimulation(scene, camera, world) {
           const lead = .55
           return footprintDistance(p.x + dx / remain * lead, p.z + dz / remain * lead, car) < .46
         }
-        const nearMoving = traffic.some(occupied) || cars.some(occupied)
+        const nearMoving = traffic.some(occupied) || cars.some(occupied) || patrolCars.some(occupied)
         const stopping = distance(p, player) < 1.45
         if (!nearMoving && !stopping) {
           p.yaw = angle(p.yaw + angle(Math.atan2(-dx, -dz) - p.yaw) * (1 - Math.exp(-6 * dt)))
@@ -1277,8 +1581,7 @@ export function createSimulation(scene, camera, world) {
       vx = vz = 0
       if (!walk.route.length) {
         approachDoor = null
-        beginEntry(walk.car)
-        walk.onDoor?.()
+        if (beginEntry(walk.car).ok) walk.onDoor?.()
       }
       return
     }
@@ -1293,7 +1596,7 @@ export function createSimulation(scene, camera, world) {
   }
 
   function enterExit(onDoor = null) {
-    if (approachDoor) return { ok: false, message: "Walking to the driver’s door." }
+    if (approachDoor) return { ok: false, message: "Walking to the driver's door." }
     if (transfer)
       return { ok: false, entered: !!current, car: transfer.car, message: 'Wait for the door.' }
     if (current) {
@@ -1313,10 +1616,12 @@ export function createSimulation(scene, camera, world) {
       for (const [side, long] of offsets) {
         const x = car.x + side * cos + long * sin,
           z = car.z - side * sin + long * cos
+        const exitGroups = hardcore ? vehicleGroups : [cars]
         if (
           !blocked(x, z, 0.32, floor(x, z) + 0.6) &&
           !wetAt(x, z) &&
-          !cars.some((o) => o !== car && footprintDistance(x, z, o) < 0.31)
+          !exitGroups.some((group) => group.some((o) => o.active && o !== car && footprintDistance(x, z, o) < 0.31)) &&
+          (!hardcore || !npcs.some((p) => exposedPerson(p) && Math.hypot(x - p.x, z - p.z) < .55))
         ) {
           spot = { x, z }
           break
@@ -1333,6 +1638,7 @@ export function createSimulation(scene, camera, world) {
       car.braking = false
       car.steer = 0
       car.gear = 'N'
+      if (car.police) car.available = true
       startTransfer(car, 'exit', spot)
       current = null
       Object.assign(player, {
@@ -1363,8 +1669,15 @@ export function createSimulation(scene, camera, world) {
   }
 
   function beginEntry(car) {
+    if (car.police && (!car.active || !car.available))
+      return { ok: false, car, message: 'The cruiser is occupied.' }
     startTransfer(car, 'enter', player)
     current = car
+    if (hardcore && (car.police || !(hooks.isOwned?.(car.id) ?? (car.id === 'sedan')))) {
+      // An alert is decided by the witness system at the moment of entry.
+      hooks.onCrime?.(car.police ? 'policeTheft' : 'theft', player, car.x, car.z)
+    }
+    if (car.police) Object.assign(car, { available: false, driverActive: false, taken: true, pursuitTarget: null })
     car.speed = car.steer = 0
     seat = false
     player.seated = false
@@ -1413,6 +1726,44 @@ export function createSimulation(scene, camera, world) {
     appearance = id || 'field'
     setPersonAppearance(avatar, String(appearance).toLowerCase().includes('shell') || appearance === 'rain')
   }
+  function canUseWeapon() {
+    return hardcore && !current && !seat && !approachDoor && !transfer && !player.swimming && player.health > 0
+  }
+  function respawn() {
+    approachDoor = null
+    transfer?.car.model.setDoorOpen?.(0)
+    transfer = null
+    if (current) {
+      current.speed = current.steer = 0
+      current.gear = 'N'
+      current.braking = false
+      if (current.police) current.available = true
+    }
+    current = null
+    vertical = vx = vz = remainder = pendingX = pendingY = 0
+    aimFirstPerson = seat = false
+    ramTarget = null
+    ramTime = foodClock = collisionCooldown = 0
+    const { x, z } = world.locations.home || { x: -12, z: 67 }
+    let spawn = { x, z }
+    player.y = floor(x, z)
+    // A player may have parked a car at the home spawn before the incident.
+    for (let i = 0; i <= 64; i++) {
+      const radius = Math.ceil(i / 8) * .8, a = i * Math.PI / 4
+      const px = x + radius * Math.cos(a), pz = z + radius * Math.sin(a)
+      if (!obstacleForFeet(px, pz) && !wetAt(px, pz) &&
+          !npcs.some((p) => exposedPerson(p) && Math.hypot(px - p.x, pz - p.z) < .55)) {
+        spawn = { x: px, z: pz }
+        break
+      }
+    }
+    Object.assign(player, spawn, { health: 100, y: floor(spawn.x, spawn.z), yaw: -.72, pitch: -.092,
+      seated: false, swimming: false, crouching: false, grounded: true, speed: 0, flashlight: false })
+    avatar.group.scale.setScalar(1)
+    snapping = true
+    updateFeet(1 / 60, transferKeys, {}, 0, 0)
+    updateHeadlights()
+  }
   let remainder = 0,
     pendingX = 0,
     pendingY = 0
@@ -1423,7 +1774,10 @@ export function createSimulation(scene, camera, world) {
     avatar.group.scale.setScalar(1)
     avatar.group.rotation.set(0, 0, 0)
     remainder = pendingX = pendingY = 0
-    cars.forEach((c) => (c.clearPose = null))
+    ramTarget = null
+    aimFirstPerson = false
+    ramTime = impactSpeed = impactG = 0
+    cars.forEach((c) => { c.clearPose = null; c.crashUntil = 0 })
     Object.assign(player, {
       x: -12,
       z: 67,
@@ -1480,10 +1834,15 @@ export function createSimulation(scene, camera, world) {
         active: true,
         steer: 0,
         braking: false,
+        alertUntil: 0,
+        crashUntil: 0,
+        condition: 100,
       })
+      c.travelYaw = c.yaw
       positionCar(c, 1)
       updateCarAppearance(c, false)
     }
+    resetSpecialVehicles()
     for (const [i, p] of npcs.entries()) {
       Object.assign(p, {
         x: p.originX,
@@ -1527,6 +1886,7 @@ export function createSimulation(scene, camera, world) {
     tick++
     collisionCooldown -= dt
     const { keys = new Set(), settings = {}, wet = 0, night = false } = input
+    aimFirstPerson = canUseWeapon() && keys.has('MouseRight')
     quality = (settings.quality ?? settings.preset ?? 'high').toString().toLowerCase()
     const sense = clamp(Number(settings.sensitivity) || 1, 0.05, 5) * 0.0022
     const lookX =
@@ -1546,7 +1906,9 @@ export function createSimulation(scene, camera, world) {
       camera.updateProjectionMatrix()
     }
     if (present) for (const c of cars) updateCarAppearance(c, night)
+    if (present && current?.police) updateCarAppearance(current, night)
     traffic.forEach((c, i) => advanceTraffic(c, i, dt, night))
+    patrolCars.forEach((c, i) => advancePatrol(c, i, dt, night))
     npcs.forEach((p, i) => advancePerson(p, i, dt, input.hour ?? 11, night))
     if (doorIdle > 0) {
       doorIdle -= dt
@@ -1564,6 +1926,8 @@ export function createSimulation(scene, camera, world) {
     snapping = false
   }
   function serialize() {
+    const saveCar = ({ id, x, z, yaw, fuel, condition, headlights, upgraded }) =>
+      ({ id, x, z, yaw, fuel, condition, headlights, upgraded })
     return {
       player: {
         x: player.x,
@@ -1574,16 +1938,19 @@ export function createSimulation(scene, camera, world) {
         health: player.health,
         flashlight: player.flashlight,
       },
-      cars: cars.map(({ id, x, z, yaw, fuel, condition, headlights, upgraded }) => ({
-        id,
-        x,
-        z,
-        yaw,
-        fuel,
-        condition,
-        headlights,
-        upgraded,
-      })),
+      cars: cars.map(saveCar),
+      ...(hardcore ? {
+        patrolCars: patrolCars.filter((c) => c.active).map((c) => ({ ...saveCar(c), taken: c.taken })),
+        trafficDrivers: traffic.map((c) => ({
+          id: c.id, progress: c.progress, yaw: c.yaw, speed: c.speed,
+          driverHealth: c.driverHealth, condition: c.condition, active: c.active,
+          recoverIn: Math.max(0, c.driverRecovery - elapsed),
+          ...(c.reckless ? { weave: c.weave, policeStop: c.policeStop,
+            burstIn: Math.max(0, c.burstAt - elapsed), burstFor: Math.max(0, c.burstUntil - elapsed),
+            evadeFor: Math.max(0, c.evadeUntil - elapsed), pauseFor: Math.max(0, c.incidentPause - elapsed),
+            reportIn: Math.max(0, c.reportAfter - elapsed) } : {}),
+        })),
+      } : {}),
       current: current?.id ?? null,
       fleetParking: 2,
       first,
@@ -1600,9 +1967,14 @@ export function createSimulation(scene, camera, world) {
       Math.abs(v.x) <= 900 &&
       Math.abs(v.z) <= 900 &&
       Number.isFinite(v.yaw)
+    const savedPatrol = hardcore ? (data.patrolCars || []) : []
+    if (!Array.isArray(savedPatrol) || savedPatrol.length > PATROL_POSTS.length ||
+        savedPatrol.some((c) => !c || !patrolCars.some((known) => known.id === c.id)))
+      throw Error('Invalid patrol vehicles in save.')
+    const savedFleet = data.cars.concat(savedPatrol)
     if (
       !validPose(data.player) ||
-      !data.cars.every(
+      !savedFleet.every(
         (v) => v && validPose(v) && Number.isFinite(v.fuel) && Number.isFinite(v.condition),
       )
     )
@@ -1615,12 +1987,13 @@ export function createSimulation(scene, camera, world) {
       y: floor(limitX(p.x, 0.3), limitZ(p.z, 0.3)),
       yaw: angle(p.yaw),
       pitch: clamp(Number(p.pitch) || 0, -1.25, 1.22),
-      health: clamp(Number.isFinite(p.health) ? p.health : 100, 1, 100),
+      health: clamp(Number.isFinite(p.health) ? p.health : 100, hardcore ? 0 : 1, 100),
       flashlight: !!p.flashlight,
     })
     if (Number.isFinite(p.y)) player.y = clamp(p.y, player.y, player.y + 10)
-    for (const saved of data.cars) {
-      const c = cars.find((v) => v.id === saved.id)
+    const fleet = cars.concat(patrolCars)
+    for (const saved of savedFleet) {
+      const c = fleet.find((v) => v.id === saved.id)
       if (!c) continue
       const [mx, mz] = carMargins(c.spec, saved.yaw)
       Object.assign(c, {
@@ -1636,11 +2009,37 @@ export function createSimulation(scene, camera, world) {
         headlights: !!saved.headlights,
         upgraded: !!saved.upgraded,
       })
+      if (c.police) Object.assign(c, { active: true, taken: !!saved.taken || data.current === c.id,
+        available: c.id !== data.current })
       positionCar(c, 1)
     }
     first = data.first !== false
     driverView = !!data.driverView
-    current = cars.find((v) => v.id === data.current) || null
+    current = fleet.find((v) => v.active && v.id === data.current) || null
+    if (hardcore && Array.isArray(data.trafficDrivers)) {
+      const bounded = (value, max, fallback = 0) => Number.isFinite(value) ? clamp(value, 0, max) : fallback
+      for (const driver of data.trafficDrivers.slice(0, traffic.length)) {
+        const c = traffic.find(v => v.id === driver?.id)
+        if (!c || !Number.isFinite(driver.progress) || !Number.isFinite(driver.yaw)) continue
+        // Route progress keeps a restored driver on its existing road.
+        c.progress = bounded(driver.progress, c.route.total)
+        const at = sampleRoute(c.route, c.progress)
+        if (c.reckless) {
+          c.weave = Number.isFinite(driver.weave) ? clamp(driver.weave, -2.4, .85) : 0
+          at.x += Math.cos(at.yaw) * c.weave
+          at.z -= Math.sin(at.yaw) * c.weave
+          Object.assign(c, { policeStop: bounded(driver.policeStop, 8), burstAt: bounded(driver.burstIn, 48),
+            burstUntil: bounded(driver.burstFor, 10), evadeUntil: bounded(driver.evadeFor, 7),
+            incidentPause: bounded(driver.pauseFor, 1.2), reportAfter: bounded(driver.reportIn, 18) })
+        }
+        Object.assign(c, at, { yaw: angle(driver.yaw), travelYaw: angle(driver.yaw),
+          active: driver.active !== false, speed: bounded(driver.speed, 17),
+          condition: bounded(driver.condition, 100, 100), driverHealth: bounded(driver.driverHealth, 100, 100),
+          driverRecovery: bounded(driver.recoverIn, 40) })
+        positionCar(c, 1)
+        updateCarAppearance(c, false)
+      }
+    }
     // The untouched pickup in older saves was parked nose-first into the westbound lane.
     if (!data.fleetParking) {
       const truck = cars.find((v) => v.id === 'pickup')
@@ -1661,6 +2060,13 @@ export function createSimulation(scene, camera, world) {
     cars,
     npcs,
     traffic,
+    patrolCars,
+    setHardcore,
+    spawnCityPerson: actor,
+    dispatchPatrol,
+    stopPatrol,
+    alertTraffic,
+    respawn,
     reset,
     update,
     serialize,
@@ -1683,6 +2089,8 @@ export function createSimulation(scene, camera, world) {
     get firstPerson() {
       return current ? driverView : first
     },
+    get canUseWeapon() { return canUseWeapon() },
+    get aimFirstPerson() { return aimFirstPerson },
     get trafficViolation() {
       return violation
     },

@@ -199,6 +199,14 @@ export function createAudio() {
     }
   }
   const cue = {
+    shot: () => {
+      burst(0.085, 1600, 0.29)
+      tone(132, 60, 0.09, 0.13, 'triangle')
+    },
+    reload: () => {
+      burst(0.05, 2100, 0.1, 'bandpass')
+      burst(0.07, 1300, 0.13, 'bandpass', 0.25)
+    },
     ui: () => tone(440, 585, 0.085, 0.085),
     step: () => {
       tone(660, 710, 0.11, 0.09)

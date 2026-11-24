@@ -10,6 +10,18 @@ For an offline copy, follow the standalone build instructions below.
 
 Choose **New Game**. Look around with the mouse or arrow keys, walk to the sedan, and press **E** when its prompt appears. Follow the orange route on the minimap to Civic Square. Bring the car to a complete stop inside the marked bay to collect the first reward.
 
+## Normal and Hardcore modes
+
+Select a mode above **New Game** or **Continue**. Normal Mode uses the original county, campaign and survival rules. Hardcore Mode adds armed encounters, dangerous traffic and county patrols to that same journey. Each mode has its own manual save and autosave. Earlier saves appear under Normal Mode.
+
+In Hardcore, you start with 100 HP and a Rook Sidearm. On foot, hold the right mouse button to aim and the left to fire. Press **R** to reload, **Q** to cycle weapons, or **1–3** to select an owned weapon. Use **E** for doors, vehicles and other interactions. On a standard controller, use the left and right triggers to aim and fire, D-pad down to reload and the right shoulder button to cycle weapons. Driving controls stay the same.
+
+The **Parcel Exchange Outfitters** counter inside the post office and **North Ridge Outfitters** on the back of the trailhead board sell weapons and ammunition for campaign money. Open the county map and choose either outfitter to set a route.
+
+Witnesses can report gunfire, assaults, vehicle theft and deliberate ramming. The driveway sedan, registered cars and the off-roader issued for Mountain Exploration are authorized. A stolen police cruiser sends its position when taken. Stars show the strength of the response. Officers can lose sight of you and search the last reported location. Break contact long enough for stars to fall. When officers hold you at close range, or your health reaches zero, the recovery screen returns you to Cedar House. Arrest costs up to $25 and county rescue costs up to $15.
+
+Under **Settings → World**, **Blood Effects** enables a brief burst of stylized particles. It starts off and is saved as a browser preference.
+
 The browser captures the mouse during play. Click the world to recapture it. Arrow keys also control your view. Escape pauses the game. In an embedded preview that restricts mouse capture, open the HTML directly in a browser.
 
 [View the front and rear interior comparisons for all five vehicles.](docs/vehicle-interiors/README.md)
@@ -116,6 +128,8 @@ python tests/check_field.py
 ~~~
 
 The first check covers the start menu, movement, vehicle controls, mission transitions, rewards, purchases and save/load. It places the player at later mission checkpoints to test the completion conditions. The second checks physical interactions, the lift, swimming, stamina, weather, lighting and route generation.
+
+Run **python tests/hardcore-browser.py** against the same server to check mode isolation, weapon input and purchases, door cover, hit effects, arrest, death and saved recovery. **tests/hardcore-city.mjs** and **tests/hardcore-traffic.mjs** exercise the AI and vehicle controller with deterministic encounters. Bundle them using the Node/esbuild command below, substituting the desired test filename.
 
 The driving regression advances the actual vehicle controller through the streets using steering, throttle and brake inputs. It verifies the first mission payout, the mountain switchbacks, staff entering and leaving work, and signal-controlled pedestrian crossings. With Node and esbuild installed, run it from the source folder.
 

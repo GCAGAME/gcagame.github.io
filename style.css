@@ -354,6 +354,47 @@ kbd {
   width: clamp(275px, 24vw, 370px);
   margin-top: clamp(21px, 4.2vh, 48px);
 }
+.mode-picker {
+  display: flex;
+  gap: 3px;
+  margin-bottom: 8px;
+  padding: 3px;
+  border: 1px solid #d6dfd54d;
+  border-radius: 3px;
+  background: #101a1bc9;
+}
+.mode-picker button {
+  flex: 1;
+  color: #d2d7cc;
+  padding: 5px 9px;
+  font-size: 12px;
+  border-radius: 2px;
+}
+.mode-picker button[aria-pressed="true"] { background: #e2e3d5; color: #1b2423; }
+.combat-hud {
+  position: absolute;
+  right: var(--hud-edge);
+  top: calc(var(--hud-edge) + 44px);
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+  pointer-events: none;
+}
+.combat-hud > div {
+  padding: 5px 10px;
+  background: #111d1ed9;
+  border-right: 2px solid var(--accent);
+  text-align: right;
+}
+.combat-hud small { font-size: 11px; }
+#gear-readout b { margin-left: 10px; font-variant-numeric: tabular-nums; }
+#wanted-stars { display: block; color: #ffbe81; letter-spacing: 2px; }
+.armed .aim-dot { box-shadow: 0 0 0 1px #161d1ecc, 0 0 0 4px #e7eee72b; }
+.outfitter-wallet { display: flex; justify-content: space-between; }
+.outfitter-item { border-top: 1px solid #b4c1af40; padding: 12px 0; }
+.outfitter-item h3 { margin: 0; }
+.outfitter-item p { font-size: 12px; opacity: .85; }
+.shop-routes { display: grid; gap: 4px; }
 .menu-primary,
 .continue-button {
   width: 100%;

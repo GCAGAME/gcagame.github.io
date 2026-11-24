@@ -69,6 +69,7 @@ const defaultSettings = {
   weather: 'Auto',
   volume: 0.65,
   vibration: true,
+  bloodEffects: false,
 }
 const choice = (key, label, values) => ({ key, label, values })
 const range = (key, label, min, max, step, unit = '') => ({ key, label, min, max, step, unit })
@@ -99,6 +100,7 @@ const groups = {
     toggle('headBob', 'Walking head movement'),
   ],
   World: [
+    toggle('bloodEffects', 'Blood Effects'),
     range('timeScale', 'Clock speed', 0, 24, 0.5, '×'),
     choice('weather', 'Weather', [
       'Auto',
@@ -161,6 +163,14 @@ const controls = {
     ['Tab', 'Objectives'],
     ['Esc', 'Pause / back'],
   ],
+  Hardcore: [
+    ['Right / left mouse', 'Aim / fire on foot'],
+    ['R / Q', 'Reload / cycle owned weapons'],
+    ['1 / 2 / 3', 'Equip a weapon by slot'],
+    ['E', 'Interact or shop'],
+    ['L2 / R2 on foot', 'Aim / fire'],
+    ['D-pad ↓ / R1 on foot', 'Reload / cycle weapon'],
+  ],
 }
 const titles = {
   pause: 'Paused',
@@ -173,6 +183,8 @@ const titles = {
   shop: 'County store',
   dialog: 'Conversation',
   dealership: 'Foundry Motors',
+  outfitters: 'County Outfitters',
+  recovery: 'County rescue',
 }
 
 function formatSetting(s, value) {
@@ -286,6 +298,7 @@ export function createUI(actions = {}) {
     $('hud').hidden = name !== 'hud'
     $('panel-screen').hidden = !titles[name]
     sheet.classList.toggle('wide', ['map', 'controls'].includes(name))
+    sheet.querySelector('.close-sheet').hidden = name === 'recovery'
     if (document.activeElement instanceof HTMLElement && document.activeElement.closest('[hidden]'))
       document.activeElement.blur()
   }
@@ -315,6 +328,8 @@ export function createUI(actions = {}) {
     origin = 'menu'
     merge({ hasSave: !!hasSave })
     setView('menu')
+    for (const b of root.querySelectorAll('[data-mode]'))
+      b.setAttribute('aria-pressed', String(b.dataset.mode === (data.mode || 'normal')))
     soundDisplay()
     root.querySelector('[data-action="continue"]').disabled = !hasSave
     setText('save-status', hasSave ? 'Saved game' : 'No save')
@@ -360,6 +375,18 @@ export function createUI(actions = {}) {
     const health = Math.max(0, Math.min(100, integer(player.health, 100)))
     $('health-bar').style.width = health + '%'
     setText('hud-health', health)
+    const combat = data.combat
+    $('combat-hud').hidden = !combat
+    $('hud').classList.toggle('armed', !!combat && !vehicle)
+    if (combat) {
+      $('wanted-readout').hidden = !combat.wanted
+      $('wanted-readout').setAttribute('aria-label', 'Wanted level ' + combat.wanted + ' of 5 · ' + combat.status)
+      setText('wanted-stars', '★'.repeat(combat.wanted) + '☆'.repeat(5 - combat.wanted))
+      setText('wanted-status', combat.status + (combat.arrest > 0 ? ' · ' + Math.round(combat.arrest * 100) + '%' : ''))
+      $('gear-readout').hidden = !!vehicle
+      setText('equipped-weapon', combat.name)
+      setText('ammo-count', combat.reloading ? 'Reloading…' : combat.loaded + ' / ' + combat.reserve)
+    }
     const condition =
       player.chill > 60
         ? ' · Cold'
@@ -388,7 +415,7 @@ export function createUI(actions = {}) {
       setText('car-fuel', 'Fuel ' + integer(vehicle.fuel, 100) + '%')
       setText('car-condition', 'Body ' + integer(vehicle.condition, 100) + '%')
     }
-    const help = vehicle ? 'drive' : 'foot'
+    const help = vehicle ? 'drive' : combat ? 'armed' : 'foot'
     if (help !== lastHelp) {
       lastHelp = help
       const items = vehicle
@@ -397,7 +424,7 @@ export function createUI(actions = {}) {
             ['Space', 'Handbrake'],
             ['Esc', 'Pause'],
           ]
-        : [
+        : combat ? [['RMB', 'Aim'], ['LMB', 'Fire'], ['R', 'Reload'], ['Q', 'Switch'], ['E', 'Use']] : [
             ['WASD', 'Move'],
             ['V', 'Camera'],
             ['Tab', 'Objectives'],
@@ -424,7 +451,7 @@ export function createUI(actions = {}) {
     else if (view === 'menu') {
       soundDisplay()
       if (values?.world) cartography.draw($('overview-map'), data, 'overview')
-    } else if (['inventory', 'shop', 'dialog', 'dealership'].includes(view)) {
+    } else if (['inventory', 'shop', 'dialog', 'dealership', 'outfitters'].includes(view)) {
       const signature = JSON.stringify([data.money, data[view]])
       if (signature !== panelSignature) renderPanel()
     } else if (view === 'map' && values?.waypoint !== undefined) drawFullMap()
@@ -734,6 +761,26 @@ export function createUI(actions = {}) {
           : 'GCA: Grand City Adventures',
     )
     switch (view) {
+      case 'recovery':
+        setText('sheet-title', data.outcome === 'arrest' ? 'Under arrest' : 'You’re down')
+        html = '<p class="dialogue-copy">' +
+          (data.outcome === 'arrest' ? 'County patrol has taken you into custody.' : 'County rescue is taking you home.') +
+          ' Return to Cedar House with full health. County fee · ' +
+          money(Math.min(data.money, data.outcome === 'arrest' ? 25 : 15)) + '</p>' +
+          rowButton('data-action="recover"', 'Return to Cedar House', 'main')
+        break
+      case 'outfitters':
+        html = '<p class="outfitter-wallet">Available funds <b>' + money(data.money) + '</b></p>' +
+          (data.outfitters || []).map(w => {
+            const disabled = w.owned ? w.reserve > 240 - w.ammo || data.money < w.cost : data.money < w.price
+            const action = 'data-outfit="' + w.id + '" data-ammo="' + w.owned + '"' + (disabled ? ' disabled' : '')
+            return '<section class="outfitter-item"><h3>' + esc(w.name) + '</h3><p>' +
+              w.damage + ' damage · ' + w.capacity + ' round magazine · ' +
+              (1 / w.interval).toFixed(1) + ' shots/s · ' + (w.spread < 0.02 ? 'Tight' : w.spread > 0.03 ? 'Wide' : 'Medium') +
+              ' spread</p>' + rowButton(action, w.owned ? w.reserve > 240 - w.ammo ? 'Reserve full' :
+                '+' + w.ammo + ' reserve rounds · ' + money(w.cost) : 'Purchase · ' + money(w.price)) + '</section>'
+          }).join('')
+        break
       case 'pause':
         html =
           '<div class="pause-list">' +
@@ -761,6 +808,7 @@ export function createUI(actions = {}) {
         html =
           '<div class="control-cols"><div>' +
           controlGroup('On foot') +
+          controlGroup('Hardcore') +
           '</div><div>' +
           controlGroup('Driving') +
           controlGroup('Navigation') +
@@ -774,6 +822,9 @@ export function createUI(actions = {}) {
       case 'map':
         html =
           '<div class="full-map"><canvas id="full-map" aria-label="Interactive county map. Click to mark a waypoint."></canvas><span class="atlas-north">N ↑</span><div class="map-zoom"><button data-zoom="out" aria-label="Zoom out">−</button><button data-zoom="in" aria-label="Zoom in">+</button><button data-zoom="fit" aria-label="Fit county" title="Fit county">↺</button></div></div><div class="map-legend"><span><i class="legend-pip"></i> You</span><span><i class="legend-pip orange"></i> Objective</span><span><i class="legend-pip blue"></i> Waypoint</span><button id="clear-waypoint" class="item-button" data-action="clearWaypoint">Clear waypoint</button></div><p class="map-caption">Click the map to mark a waypoint. Scroll to zoom.</p>'
+        if (data.mode === 'hardcore')
+          html += '<div class="shop-routes">' + data.shops.map((s, i) =>
+            rowButton('data-shop-route="' + i + '"', 'Route to ' + s.name)).join('') + '</div>'
         break
       case 'objectives':
         html = objectivesPanel()
@@ -869,6 +920,9 @@ export function createUI(actions = {}) {
     const btn = event.target.closest('button')
     if (!btn || btn.disabled) return
     const d = btn.dataset
+    if (d.mode) return call('selectMode', d.mode)
+    if (d.outfit) return call('outfit', d.outfit, d.ammo === 'true')
+    if (d.shopRoute != null) return call('guideShop', Number(d.shopRoute))
     if (d.panel) return call('open', d.panel)
     if (d.buy != null) return call('buy', d.buy)
     if (d.use != null) return call('use', d.use)

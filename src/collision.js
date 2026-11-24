@@ -46,9 +46,9 @@ export function circleHits(x, z, r, poly) {
 }
 // Intersect the time interval on every separating axis. Angular padding bounds
 // each corner's arc for the whole substep, including a purely rotating bumper.
-export function sweepHull(a, b, dx, dz, padding = 0) {
+export function sweepHull(a, b, dx, dz, padding = 0, contact = null) {
   let entry = -Infinity,
-    exit = Infinity
+    exit = Infinity, nx = 0, nz = 0
   for (const p of [a, b])
     for (let i = 0; i < p.length; i++) {
       const j = (i + 1) % p.length,
@@ -78,9 +78,16 @@ export function sweepHull(a, b, dx, dz, padding = 0) {
       }
       const t0 = (left - hi - margin) / speed,
         t1 = (right - lo + margin) / speed
-      entry = Math.max(entry, Math.min(t0, t1))
+      const start = Math.min(t0, t1)
+      if (contact && start > entry) {
+        const scale = -Math.sign(speed) / len
+        nx = ax * scale
+        nz = az * scale
+      }
+      entry = Math.max(entry, start)
       exit = Math.min(exit, Math.max(t0, t1))
       if (exit < entry || exit < 0 || entry > 1) return 1
     }
+  if (contact) { contact.nx = nx; contact.nz = nz }
   return Math.max(0, Math.min(1, entry))
 }

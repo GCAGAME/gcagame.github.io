@@ -243,6 +243,7 @@ export function createCartography() {
         marker(ctx, p, ORANGE, 2.6, true)
     }
     if (mode !== 'overview') {
+      for (const shop of data.shops || []) marker(ctx, project(shop), '#f5df8d', 3.4, true)
       const goal = data.missionTarget || (!data.waypoint ? data.target : null)
       if (goal) marker(ctx, project(goal), ORANGE, 4.2, true)
       if (data.waypoint) marker(ctx, project(data.waypoint), '#91d5e3', 4.2, true)
