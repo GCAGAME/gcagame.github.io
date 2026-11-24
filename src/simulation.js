@@ -658,6 +658,7 @@ export function createSimulation(scene, camera, world) {
   function endArrestShot() {
     if (!arrestTake) return
     custody.end()
+    arrestTake.car?.model.setDoorOpen(0)
     if (transfer?.mode === 'exit') {
       transfer.car.model.setDoorOpen(0)
       transfer = null
@@ -719,13 +720,12 @@ export function createSimulation(scene, camera, world) {
     if (avatar.ready && officer.model.ready) take.clock += dt
     else if (t > 4 && (avatar.loadFailed || officer.model.loadFailed)) return true
     const time = take.clock, facing = take.facing
-    const exitAt = .85, groundAt = car ? 2.6 : 0
+    const openAt = .35, exitAt = 1.55, groundAt = car ? 3.75 : 0
     const beat = time-groundAt
     if (car && beat < 0) {
       if (time >= exitAt && !take.exited) {
         leaveCar(car,take.door)
         take.exited = true
-        sound?.('door')
       }
       if (transfer?.mode === 'exit') presentDriver(dt)
       else if (current) {
@@ -739,6 +739,17 @@ export function createSimulation(scene, camera, world) {
         avatar.group.rotation.set(0,car.yaw,0)
         posePerson(avatar,dt,0,{look:true})
       }
+      // Open the hinged panel while the driver is still seated, then hold
+      // it clear until the exit animation and both feet have settled.
+      if (!take.unlatched && time >= openAt) {
+        take.unlatched = true
+        sound?.('door')
+      }
+      car.model.detail.visible = true
+      car.model.coarse.visible = false
+      const opening = THREE.MathUtils.smoothstep(time,openAt,1.02)
+      const closing = THREE.MathUtils.smoothstep(time,2.99,3.62)
+      car.model.setDoorOpen(opening*(1-closing))
       presentPedestrian(officer,player,dt,0)
       custody.light(take.cruiser, avatar.group.position, facing, time)
       const reveal = THREE.MathUtils.smoothstep(time,.45,2.25)

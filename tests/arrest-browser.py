@@ -108,6 +108,7 @@ with sync_playwright() as pw:
             seated=next(i for i,f in enumerate(frames) if f['seated'])
             door=next(i for i,f in enumerate(frames) if f['door']>.5)
             cuff=next(i for i,f in enumerate(frames) if f['visible'])
+            assert any(f['seated'] and f['door']>1 for f in frames), 'Door must fully open before the driver leaves'
             assert seated<door<cuff
             assert any(f['door']>.25 and f['sill']>.4 for f in frames[door:cuff])
             assert all(f['sill']>.6 for f in frames if f['visible'])
